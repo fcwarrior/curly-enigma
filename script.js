@@ -540,7 +540,10 @@ class NutriSoft {
         document.getElementById('add-patient-btn')?.addEventListener('click', this.addPatient);
         document.getElementById('clear-patient-form-btn')?.addEventListener('click', this.clearPatientForm);
         document.getElementById('patient-dob')?.addEventListener('change', (e) => this.updateAgeDisplay(e.target.value));
-        document.getElementById('patient-weight')?.addEventListener('input', () => this.updateBMIDisplay());
+        document.getElementById('patient-weight')?.addEventListener('input', () => {
+            this.updateBMIDisplay();
+            this.updateCaloricNeedsTotal();
+        });
         document.getElementById('patient-height')?.addEventListener('input', () => this.updateBMIDisplay());
         document.getElementById('caloric-needs')?.addEventListener('input', () => this.updateCaloricNeedsTotal());
         document.getElementById('prescription-patient')?.addEventListener('change', () => this.updateCaloricNeedsTotal());
@@ -1272,6 +1275,7 @@ class NutriSoft {
         const totalField = document.getElementById('caloric-needs-total');
         if (totalField) totalField.value = totalKcal ? totalKcal.toFixed(0) : '';
 
+        const macroSuggestion = document.getElementById('macro-suggestion');
         if (weight > 0 && totalKcal > 0) {
             const protKcal = totalKcal * 0.18;
             const lipKcal = totalKcal * 0.32;
@@ -1282,6 +1286,15 @@ class NutriSoft {
             this.setInputValue('protein-needs', protPerKg.toFixed(2));
             this.setInputValue('lipid-needs', lipPerKg.toFixed(2));
             this.setInputValue('glucose-rate', gluRate.toFixed(2));
+            const protG = protKcal / 4;
+            const lipG = lipKcal / 9;
+            const gluG = gluKcal / 3.4;
+            if (macroSuggestion) {
+                macroSuggestion.textContent =
+                    `Distribuição sugerida: ${protG.toFixed(1)}g proteína, ${lipG.toFixed(1)}g lípidos, ${gluG.toFixed(1)}g glicose`;
+            }
+        } else if (macroSuggestion) {
+            macroSuggestion.textContent = '';
         }
     }
     addPatient() { 

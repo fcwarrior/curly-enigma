@@ -10,6 +10,11 @@ body {
     -moz-osx-font-smoothing: grayscale;
 }
 
+#macro-suggestion {
+    color: #0284c7;
+    font-weight: 500;
+}
+
 .container {
     max-width: 1280px; /* Increased max-width slightly */
     margin-left: auto;
