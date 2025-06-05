@@ -1,6 +1,11 @@
 // --- script.js ---
 
 /**
+ * Global application constants
+ */
+const APP_VERSION = '1.0.0';
+
+/**
  * Manages data persistence using localStorage.
  * Handles getting, saving, exporting, and importing application data.
  */
@@ -66,6 +71,7 @@ class DataManager {
 
     exportAllDataToFile() {
         const allData = {
+            version: APP_VERSION,
             patients: this.getPatients(),
             prescriptions: this.getPrescriptions(),
             solutions: this.getSolutions(),
@@ -199,6 +205,9 @@ class DataManager {
         try {
             let importedSomething = false;
             if (dataType === 'all') {
+                if (jsonData.version && jsonData.version !== APP_VERSION) {
+                    this.displayNotification(`Aviso: versão dos dados (${jsonData.version}) diferente da versão da aplicação (${APP_VERSION}).`, 'warning');
+                }
                 if (jsonData.patients && Array.isArray(jsonData.patients)) { this.savePatients(jsonData.patients); importedSomething = true; }
                 if (jsonData.prescriptions && Array.isArray(jsonData.prescriptions)) { this.savePrescriptions(jsonData.prescriptions); importedSomething = true; }
                 if (jsonData.solutions && typeof jsonData.solutions === 'object') { this.saveSolutions(jsonData.solutions); importedSomething = true; }
@@ -3003,6 +3012,10 @@ document.addEventListener('DOMContentLoaded', () => {
             console.log("Initial hash is empty or '#', forcing to #patients for robust startup.");
             window.location.hash = 'patients';
         }
+
+        window.addEventListener('beforeunload', () => {
+            try { app.saveAllData(); } catch (e) { console.error('Erro ao gravar dados antes de sair:', e); }
+        });
 
     } catch (error) {
         console.error("FATAL: Error initializing NutriSoft application:", error);
