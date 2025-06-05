@@ -1,0 +1,306 @@
+```css
+/* style.css - NutriSoft Custom Styles */
+
+/* --- Base & Typography --- */
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    line-height: 1.6;
+    color: #1f2937; /* gray-800 */
+    background-color: #f9fafb; /* gray-50 */
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+.container {
+    max-width: 1280px; /* Increased max-width slightly */
+    margin-left: auto;
+    margin-right: auto;
+    padding-left: 1rem; /* px-4 equivalent */
+    padding-right: 1rem;
+}
+
+/* --- Header --- */
+/* Styling primarily handled by Tailwind classes in HTML */
+
+/* --- Navigation --- */
+.nav-btn {
+    /* Base styles defined by Tailwind in HTML: px-3 py-2 rounded-lg transition-colors duration-200 ease-in-out cursor-pointer */
+    /* Hover styles defined by Tailwind: hover:bg-blue-700 hover:text-white */
+    display: inline-flex; /* Ensure alignment with icons */
+    align-items: center;
+    text-decoration: none;
+    color: #e5e7eb; /* gray-200 - Initial color for nav buttons */
+    padding: 0.5rem 0.75rem; /* py-2 px-3 */
+    border-radius: 0.5rem; /* rounded-lg */
+    transition: color 0.2s ease-in-out, background-color 0.2s ease-in-out;
+    cursor: pointer;
+}
+.nav-btn:hover {
+     background-color: #2563eb; /* blue-600 or similar for hover */
+     color: white; /* Ensure text is white on hover background */
+}
+/* Active state defined directly in style block in HTML for dynamic class addition */
+/* .nav-btn.active is handled in the <style> tag in index.html */
+
+.nav-btn i { /* Icon margin */
+    margin-right: 0.35rem; /* Slightly smaller margin */
+}
+/* Hide admin buttons by default - JS will remove 'hidden' based on permissions */
+#solutions-nav-btn, #settings-nav-btn {
+    /* Tailwind 'hidden' class applied in HTML initially */
+}
+
+/* --- Sections --- */
+.section {
+    background-color: #ffffff;
+    border-radius: 0.5rem; /* rounded-lg */
+    box-shadow: 0 1px 3px 0 rgba(0,0,0,0.1), 0 1px 2px 0 rgba(0,0,0,0.06); /* shadow-md */
+    padding: 1.5rem; /* p-6 */
+    margin-bottom: 2rem; /* mb-8 */
+}
+.section h2, .section h3 {
+    color: #374151; /* gray-700 */
+    margin-bottom: 1.5rem; /* mb-6 */
+    display: flex; /* Align icons with headings */
+    align-items: center;
+}
+.section h2 i, .section h3 i {
+    margin-right: 0.5rem; /* mr-2 */
+    color: #4b5563; /* gray-600 - Icon color matches heading or slightly lighter */
+}
+
+/* --- Forms --- */
+.form-group {
+    margin-bottom: 1rem; /* Consistent spacing */
+}
+.input-field {
+    /* Base styles from Tailwind: block w-full shadow-sm border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500 sm:text-sm */
+    border: 1px solid #d1d5db; /* gray-300 */
+    padding: 0.5rem 0.75rem; /* py-2 px-3 approx */
+    font-size: 0.875rem; /* sm:text-sm */
+    line-height: 1.25rem;
+    width: 100%;
+    border-radius: 0.375rem; /* rounded-md */
+    box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05); /* shadow-sm */
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+.input-field:focus {
+    outline: none;
+    border-color: #3b82f6; /* blue-500 */
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.5); /* focus ring */
+}
+.input-field::placeholder {
+    color: #9ca3af; /* gray-400 */
+}
+/* Custom Select Arrow */
+.input-field:is(select) {
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e"); /* gray-500 arrow */
+    background-position: right 0.5rem center;
+    background-repeat: no-repeat;
+    background-size: 1.2em 1.2em;
+    padding-right: 2.5rem; /* Make room for arrow */
+}
+.input-field:is(select):focus {
+    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%233b82f6' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e"); /* blue-500 arrow on focus */
+}
+/* Input Error State - also in <style> tag in HTML for override potential */
+.input-field.error {
+    border-color: #ef4444 !important; /* red-500, ensure override */
+    box-shadow: 0 0 0 1px #ef4444 !important; /* Optional: adds a ring */
+}
+.error-message {
+    color: #ef4444; /* red-500 */
+    font-size: 0.75rem; /* text-xs */
+    margin-top: 0.25rem; /* mt-1 */
+}
+/* Hidden handled by Tailwind class or JS */
+.error-message.hidden {
+    display: none;
+}
+
+/* --- Buttons --- */
+.btn-primary {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.5rem 1rem; /* py-2 px-4 */
+    background-color: #3b82f6; /* blue-500 */
+    color: white;
+    font-weight: 600; /* font-bold */
+    border-radius: 0.375rem; /* rounded */
+    border: none;
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+}
+.btn-primary:hover {
+    background-color: #1d4ed8; /* blue-700 */
+}
+.btn-primary:focus {
+     outline: none;
+     box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.5); /* ring-2 ring-blue-500 */
+}
+
+.btn-secondary {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.5rem 1rem; /* py-2 px-4 */
+    background-color: #6b7280; /* gray-500 */
+    color: white;
+    font-weight: 600; /* font-bold */
+    border-radius: 0.375rem; /* rounded */
+    border: none;
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+}
+.btn-secondary:hover {
+     background-color: #374151; /* gray-700 */
+}
+.btn-secondary:focus {
+      outline: none;
+     box-shadow: 0 0 0 3px rgba(107, 114, 128, 0.5); /* ring-2 ring-gray-500 */
+}
+/* Disabled state handled by Tailwind or JS */
+.btn-primary:disabled, .btn-secondary:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+.btn-primary i, .btn-secondary i { /* Icon margin */
+    margin-right: 0.5rem; /* mr-2 */
+}
+
+/* --- Tables --- */
+table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.875rem; /* text-sm */
+    color: #374151; /* gray-700 */
+}
+thead {
+     background-color: #f9fafb; /* gray-50 */
+}
+th {
+    padding: 0.75rem 1rem; /* py-3 px-4 approx */
+    text-align: left;
+    font-weight: 600; /* font-semibold */
+    color: #4b5563; /* gray-600 */
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    border-bottom: 2px solid #e5e7eb; /* border-gray-200 */
+}
+td {
+    padding: 0.75rem 1rem; /* py-3 px-4 approx */
+    border-bottom: 1px solid #e5e7eb; /* border-gray-200 */
+}
+tbody tr:last-child td {
+    border-bottom: none;
+}
+tbody tr:hover:not(.no-results-row) { /* Don't apply hover to no-results row */
+    background-color: #f3f4f6; /* gray-100, slightly different from thead */
+}
+
+/* Table Actions */
+.table-action-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 0.25rem; /* p-1 */
+    margin: 0 0.125rem; /* mx-0.5 */
+    border-radius: 0.25rem; /* rounded */
+    transition: background-color 0.2s ease, color 0.2s ease;
+    color: #6b7280; /* gray-500 */
+}
+.table-action-btn:hover {
+    background-color: #e5e7eb; /* gray-200 */
+}
+/* Specific colors for actions */
+.table-action-btn[data-action="view"] { color: #3b82f6; /* blue-500 */ }
+.table-action-btn[data-action="edit"] { color: #eab308; /* yellow-500 */ }
+.table-action-btn[data-action="print"] { color: #10b981; /* green-500 */ }
+.table-action-btn[data-action="delete"] { color: #ef4444; /* red-500 */ }
+
+.table-action-btn[data-action="view"]:hover { color: #1d4ed8; /* blue-700 */ }
+.table-action-btn[data-action="edit"]:hover { color: #ca8a04; /* yellow-600 */ }
+.table-action-btn[data-action="print"]:hover { color: #059669; /* green-600 */ }
+.table-action-btn[data-action="delete"]:hover { color: #dc2626; /* red-600 */ }
+
+
+/* --- Results Display --- */
+#prescription-results-display {
+    background-color: #f9fafb;
+    border-radius: 0.375rem;
+    padding: 1rem;
+    border: 1px solid #e5e7eb;
+    box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+    margin-top: 1rem;
+}
+#prescription-results-display h4 {
+    font-size: 1rem; /* text-base */
+    font-weight: 600; /* font-semibold */
+    margin-bottom: 0.5rem; /* mb-2 */
+}
+#prescription-results-display ul {
+    list-style-type: disc;
+    margin-left: 1.25rem; /* pl-5 */
+    font-size: 0.875rem; /* text-sm */
+    line-height: 1.5;
+}
+#prescription-results-display strong {
+    font-weight: 600;
+}
+/* Specific styling for warnings/errors within results */
+#formulation-warnings h4 { color: #d97706; /* amber-600 */ }
+#formulation-errors h4 { color: #dc2626; /* red-600 */ }
+#formulation-warnings li { color: #b45309; /* amber-700 */ } /* Ensure list items in warnings also have color */
+#formulation-errors li { color: #b91c1c; /* red-700 */ } /* Ensure list items in errors also have color */
+
+
+/* --- Modals --- */
+/* Basic modal structure is defined by Tailwind classes in HTML */
+/* Ensure body scroll is prevented when modal is open (JS toggles this) */
+body.modal-open {
+    overflow: hidden;
+}
+
+/* --- Utility --- */
+/* .hidden class is defined in the <style> tag in index.html for !important */
+
+/* --- Responsive Adjustments --- */
+@media (max-width: 768px) { /* md breakpoint approx */
+    header .container {
+        /* Allow stacking via flex-wrap in HTML */
+    }
+    header nav {
+        width: 100%;
+        justify-content: center; /* Center nav items */
+        margin-top: 1rem; /* Add space if stacked */
+    }
+    .section {
+        padding: 1rem; /* p-4 */
+    }
+    .container {
+        padding-left: 0.5rem; /* px-2 */
+        padding-right: 0.5rem;
+    }
+    /* Adjust grid layouts for smaller screens if needed */
+    .lg\:grid-cols-5 { /* From prescription electrolytes */
+        grid-template-columns: repeat(2, minmax(0, 1fr)); /* 2 columns on small screens */
+    }
+    .md\:grid-cols-3 { /* From prescription details, nutritional needs, solution selection */
+        grid-template-columns: repeat(1, minmax(0, 1fr)); /* Stack on small screens */
+    }
+     @media (min-width: 768px) { /* md breakpoint, restore md columns */
+        .md\:grid-cols-3 {
+             grid-template-columns: repeat(3, minmax(0, 1fr));
+        }
+     }
+     @media (min-width: 1024px) { /* lg breakpoint, restore lg columns */
+        .lg\:grid-cols-5 {
+            grid-template-columns: repeat(5, minmax(0, 1fr));
+        }
+     }
+}
+```
