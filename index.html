@@ -139,6 +139,7 @@
                             <label for="patient-height" class="block text-sm font-medium text-gray-700">Altura (cm) <span class="text-red-500">*</span></label>
                             <input type="number" id="patient-height" placeholder="Ex: 175" step="1" min="1" title="Altura do paciente em centímetros (obrigatório, > 0)" class="input-field mt-1" required>
                             <p id="patient-height-error" class="error-message hidden text-sm" aria-live="polite"></p>
+                            <p id="patient-bmi-display" class="mt-1 text-gray-600 text-sm"></p>
                         </div>
                         <div class="form-group">
                             <label for="patient-condition" class="block text-sm font-medium text-gray-700">Condição Clínica <span class="text-red-500">*</span></label>
@@ -218,6 +219,22 @@
                              <p id="administration-route-error" class="error-message hidden text-sm" aria-live="polite"></p>
                         </div>
                     </div>
+                </fieldset>
+
+                <!-- Caloric Needs Group -->
+                <fieldset class="mb-6 p-4 bg-gray-50 rounded-md border border-gray-200">
+                    <legend class="text-lg font-semibold mb-3 text-gray-800 px-2">Necessidades Calóricas</legend>
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div class="form-group">
+                            <label for="caloric-needs" class="block text-sm font-medium text-gray-700">Necessidades Calóricas (kcal/kg/dia) <span class="text-red-500">*</span></label>
+                            <input type="number" id="caloric-needs" class="input-field mt-1 w-full" placeholder="Ex: 25" step="1" min="10" value="25" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="caloric-needs-total" class="block text-sm font-medium text-gray-700">Total Calorias (kcal/dia)</label>
+                            <input type="number" id="caloric-needs-total" class="input-field mt-1 w-full bg-gray-100" readonly>
+                        </div>
+                    </div>
+                    <p class="text-xs text-gray-500 mb-4" id="macro-suggestion"></p>
                 </fieldset>
 
                 <!-- Nutritional Needs Group -->

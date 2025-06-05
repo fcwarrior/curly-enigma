@@ -1,6 +1,11 @@
 // --- script.js ---
 
 /**
+ * Global application constants
+ */
+const APP_VERSION = '1.0.0';
+
+/**
  * Manages data persistence using localStorage.
  * Handles getting, saving, exporting, and importing application data.
  */
@@ -66,6 +71,7 @@ class DataManager {
 
     exportAllDataToFile() {
         const allData = {
+            version: APP_VERSION,
             patients: this.getPatients(),
             prescriptions: this.getPrescriptions(),
             solutions: this.getSolutions(),
@@ -199,6 +205,9 @@ class DataManager {
         try {
             let importedSomething = false;
             if (dataType === 'all') {
+                if (jsonData.version && jsonData.version !== APP_VERSION) {
+                    this.displayNotification(`Aviso: versão dos dados (${jsonData.version}) diferente da versão da aplicação (${APP_VERSION}).`, 'warning');
+                }
                 if (jsonData.patients && Array.isArray(jsonData.patients)) { this.savePatients(jsonData.patients); importedSomething = true; }
                 if (jsonData.prescriptions && Array.isArray(jsonData.prescriptions)) { this.savePrescriptions(jsonData.prescriptions); importedSomething = true; }
                 if (jsonData.solutions && typeof jsonData.solutions === 'object') { this.saveSolutions(jsonData.solutions); importedSomething = true; }
@@ -531,6 +540,13 @@ class NutriSoft {
         document.getElementById('add-patient-btn')?.addEventListener('click', this.addPatient);
         document.getElementById('clear-patient-form-btn')?.addEventListener('click', this.clearPatientForm);
         document.getElementById('patient-dob')?.addEventListener('change', (e) => this.updateAgeDisplay(e.target.value));
+        document.getElementById('patient-weight')?.addEventListener('input', () => {
+            this.updateBMIDisplay();
+            this.updateCaloricNeedsTotal();
+        });
+        document.getElementById('patient-height')?.addEventListener('input', () => this.updateBMIDisplay());
+        document.getElementById('caloric-needs')?.addEventListener('input', () => this.updateCaloricNeedsTotal());
+        document.getElementById('prescription-patient')?.addEventListener('change', () => this.updateCaloricNeedsTotal());
 
         document.getElementById('calculate-formulation-btn')?.addEventListener('click', this.calculateFormulation);
         document.getElementById('save-prescription-btn')?.addEventListener('click', this.savePrescription);
@@ -1111,6 +1127,7 @@ class NutriSoft {
             fieldsToValidate.push({ id: 'patient-dob', type: 'date', message: 'Data de nascimento inválida.' }); 
         } else if (section === 'prescription') {
             fieldsToValidate.push({ id: 'prescription-patient', required: true, message: 'Selecione o doente.' });
+            fieldsToValidate.push({ id: 'caloric-needs', required: true, type: 'number', min: 10, message: 'Calorias por kg devem ser >= 10.' });
             fieldsToValidate.push({ id: 'total-volume', required: true, type: 'number', min: 1, message: 'Volume total deve ser um número válido maior que zero.' });
             fieldsToValidate.push({ id: 'protein-needs', required: true, type: 'number', min: 0, message: 'Necessidades proteicas devem ser >= 0.' });
             fieldsToValidate.push({ id: 'lipid-needs', required: true, type: 'number', min: 0, message: 'Necessidades lipídicas devem ser >= 0.' });
@@ -1225,11 +1242,60 @@ class NutriSoft {
             return '';
         }
     }
-    updateAgeDisplay(dobValue) { 
+    updateAgeDisplay(dobValue) {
         const ageDisplay = document.getElementById('patient-age-display');
         if (ageDisplay) {
             ageDisplay.textContent = this.calculateAge(dobValue);
-        } 
+        }
+    }
+
+    calculateBMI(weight, heightCm) {
+        const h = heightCm / 100;
+        if (weight > 0 && h > 0) {
+            return weight / (h * h);
+        }
+        return NaN;
+    }
+
+    updateBMIDisplay() {
+        const weight = parseFloat(document.getElementById('patient-weight')?.value);
+        const height = parseFloat(document.getElementById('patient-height')?.value);
+        const bmiDisplay = document.getElementById('patient-bmi-display');
+        if (!bmiDisplay) return;
+        const bmi = this.calculateBMI(weight, height);
+        bmiDisplay.textContent = isNaN(bmi) ? '' : `IMC: ${bmi.toFixed(1)}`;
+    }
+
+    updateCaloricNeedsTotal() {
+        const kcalPerKg = parseFloat(document.getElementById('caloric-needs')?.value);
+        const patientId = parseInt(document.getElementById('prescription-patient')?.value);
+        const patient = this.patients.find(p => p.id === patientId);
+        const weight = patient?.weight ?? 0;
+        const totalKcal = (weight > 0 && kcalPerKg > 0) ? weight * kcalPerKg : 0;
+        const totalField = document.getElementById('caloric-needs-total');
+        if (totalField) totalField.value = totalKcal ? totalKcal.toFixed(0) : '';
+
+        const macroSuggestion = document.getElementById('macro-suggestion');
+        if (weight > 0 && totalKcal > 0) {
+            const protKcal = totalKcal * 0.18;
+            const lipKcal = totalKcal * 0.32;
+            const gluKcal = totalKcal * 0.50;
+            const protPerKg = protKcal / 4 / weight;
+            const lipPerKg = lipKcal / 9 / weight;
+            const gluRate = ((gluKcal / 3.4) * 1000) / (weight * 1440);
+            this.setInputValue('protein-needs', protPerKg.toFixed(2));
+            this.setInputValue('lipid-needs', lipPerKg.toFixed(2));
+            this.setInputValue('glucose-rate', gluRate.toFixed(2));
+            const protG = protKcal / 4;
+            const lipG = lipKcal / 9;
+            const gluG = gluKcal / 3.4;
+            if (macroSuggestion) {
+                macroSuggestion.textContent =
+                    `Distribuição sugerida: ${protG.toFixed(1)}g proteína, ${lipG.toFixed(1)}g lípidos, ${gluG.toFixed(1)}g glicose`;
+            }
+        } else if (macroSuggestion) {
+            macroSuggestion.textContent = '';
+        }
     }
     addPatient() { 
         console.log("NutriSoft.addPatient: Attempting to add/edit patient.");
@@ -1301,11 +1367,12 @@ class NutriSoft {
         document.getElementById('patient-weight').value = patient.weight ?? '';
         document.getElementById('patient-height').value = patient.height ?? '';
         document.getElementById('patient-condition').value = patient.condition || '';
-        document.getElementById('patient-id').value = patient.id; 
+        document.getElementById('patient-id').value = patient.id;
 
         this.updateAgeDisplay(patient.dob);
+        this.updateBMIDisplay();
         document.getElementById('patients-section')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        document.getElementById('patient-name')?.focus(); 
+        document.getElementById('patient-name')?.focus();
     }
     deletePatient(patientId) { 
         const patient = this.patients.find(p => p.id === patientId);
@@ -1358,6 +1425,8 @@ class NutriSoft {
         }
         const ageDisplay = document.getElementById('patient-age-display');
         if (ageDisplay) ageDisplay.textContent = '';
+        const bmiDisplay = document.getElementById('patient-bmi-display');
+        if (bmiDisplay) bmiDisplay.textContent = '';
 
         if (logAction) AuditLogger.log('clearPatientForm');
     }
@@ -1839,9 +1908,13 @@ class NutriSoft {
         }
 
         try {
+            const kcalPerKg = this.getNumericInput('caloric-needs', 0, true);
+            const totalKcal = (patient.weight > 0 && kcalPerKg > 0) ? patient.weight * kcalPerKg : 0;
+
             const formulation = {
-                patient: patient, 
+                patient: patient,
                 volume: totalVolume, // Prescribed total volume
+                totalKcal: totalKcal,
                 route: administrationRoute,
                 proteins: this.calculateProteins(patient),
                 glucose: this.calculateGlucose(patient),
@@ -2344,6 +2417,9 @@ class NutriSoft {
         const patientWeight = formulation.patient?.weight ?? 0;
 
         this.setInputValue('prescription-patient', patientId);
+        const kcalPerKg = patientWeight > 0 ? (formulation.totalKcal / patientWeight) : '';
+        this.setInputValue('caloric-needs', kcalPerKg ? kcalPerKg.toFixed(0) : '');
+        this.setInputValue('caloric-needs-total', formulation.totalKcal ?? '');
         this.setInputValue('total-volume', formulation.volume);
         this.setInputValue('administration-route', formulation.route || 'central');
 
@@ -2387,6 +2463,7 @@ class NutriSoft {
         this.setInputValue('cacl2-solution', formulation.electrolytes?.calcium?.solution); 
         this.setInputValue('mgso4-solution', formulation.electrolytes?.magnesium?.solution);
         this.setInputValue('phosphorus-solution', formulation.electrolytes?.phosphorus?.solution);
+        this.updateCaloricNeedsTotal();
     }
     printPrescription(originalIndex = null) { 
         console.log("NutriSoft.printPrescription: Preparing to print. Original Index:", originalIndex);
@@ -3003,6 +3080,10 @@ document.addEventListener('DOMContentLoaded', () => {
             console.log("Initial hash is empty or '#', forcing to #patients for robust startup.");
             window.location.hash = 'patients';
         }
+
+        window.addEventListener('beforeunload', () => {
+            try { app.saveAllData(); } catch (e) { console.error('Erro ao gravar dados antes de sair:', e); }
+        });
 
     } catch (error) {
         console.error("FATAL: Error initializing NutriSoft application:", error);
