@@ -1,6 +1,119 @@
 // --- script.js ---
 
 /**
+ * Global application constants
+ */
+const APP_VERSION = '1.0.0';
+// [NEW] Preloaded logo data to avoid tainted canvas errors
+let LOGO_DATA_URL = '';
+
+/* [NOVO] Simple event bus */
+const EventBus = {
+    events: {},
+    on(event, handler) {
+        (this.events[event] = this.events[event] || []).push(handler);
+    },
+    emit(event, payload) {
+        (this.events[event] || []).forEach(fn => fn(payload));
+    }
+};
+
+/* [NOVO] tema claro/escuro */
+function initTheme() {
+    const pref = localStorage.getItem('theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    document.documentElement.classList.toggle('dark', pref === 'dark');
+}
+function toggleTheme() {
+    const isDark = document.documentElement.classList.toggle('dark');
+    localStorage.setItem('theme', isDark ? 'dark' : 'light');
+}
+
+/* [NEW] Toast notification helper */
+function showToast(message, type = 'info') {
+    const container = document.getElementById('toast-container');
+    if (!container) { alert(message); return; }
+    const toast = document.createElement('div');
+    toast.className = `toast ${type}`;
+    toast.textContent = message;
+    container.appendChild(toast);
+    setTimeout(() => {
+        toast.classList.add('fade-out');
+        toast.addEventListener('transitionend', () => toast.remove());
+    }, 3000);
+}
+
+/* [NEW] Generic confirmation modal */
+function showConfirmationModal(message, callback) {
+    const modal = document.getElementById('confirm-modal');
+    const msg = document.getElementById('confirm-modal-message');
+    const yesBtn = document.getElementById('confirm-yes');
+    const noBtn = document.getElementById('confirm-no');
+    if (!modal || !msg || !yesBtn || !noBtn) { callback(confirm(message)); return; }
+    msg.textContent = message;
+    modal.classList.remove('hidden');
+    document.body.classList.add('modal-open');
+    const cleanup = () => {
+        modal.classList.add('hidden');
+        document.body.classList.remove('modal-open');
+        yesBtn.removeEventListener('click', yesHandler);
+        noBtn.removeEventListener('click', noHandler);
+    };
+    const yesHandler = () => { cleanup(); callback(true); };
+    const noHandler = () => { cleanup(); callback(false); };
+    yesBtn.addEventListener('click', yesHandler);
+    noBtn.addEventListener('click', noHandler);
+}
+
+function confirmAsync(message) {
+    return new Promise(resolve => showConfirmationModal(message, resolve));
+}
+
+/* [NEW] PDF preview modal */
+let lastPDFDoc = null;
+let lastPDFName = '';
+function showPDFPreview(blobUrl, filename, docInstance) {
+    lastPDFDoc = docInstance; lastPDFName = filename;
+    const frame = document.getElementById('pdf-preview-frame');
+    const modal = document.getElementById('pdf-preview-modal');
+    if (frame && modal) {
+        frame.src = blobUrl;
+        modal.classList.remove('hidden');
+        document.body.classList.add('modal-open');
+    } else {
+        window.open(blobUrl, '_blank');
+    }
+}
+document.getElementById('pdf-preview-close')?.addEventListener('click', () => {
+    document.getElementById('pdf-preview-modal')?.classList.add('hidden');
+    document.body.classList.remove('modal-open');
+    const frame = document.getElementById('pdf-preview-frame');
+    if (frame) frame.src = '';
+});
+document.getElementById('pdf-preview-download')?.addEventListener('click', () => {
+    if (lastPDFDoc) lastPDFDoc.save(lastPDFName || 'prescricao.pdf');
+});
+
+// [NEW] Preload logo image as data URL to prevent CORS issues when exporting PDF
+function preloadLogo() {
+    const img = document.getElementById('logo-img');
+    if (!img) return;
+    img.crossOrigin = 'anonymous';
+    if (img.complete) {
+        const canvas = document.createElement('canvas');
+        canvas.width = img.naturalWidth; canvas.height = img.naturalHeight;
+        canvas.getContext('2d').drawImage(img, 0, 0);
+        LOGO_DATA_URL = canvas.toDataURL('image/jpeg');
+    } else {
+        img.onload = () => {
+            const canvas = document.createElement('canvas');
+            canvas.width = img.naturalWidth; canvas.height = img.naturalHeight;
+            canvas.getContext('2d').drawImage(img, 0, 0);
+            LOGO_DATA_URL = canvas.toDataURL('image/jpeg');
+        };
+    }
+}
+
+/**
  * Manages data persistence using localStorage.
  * Handles getting, saving, exporting, and importing application data.
  */
@@ -9,6 +122,7 @@ class DataManager {
         this.patientsKey = 'patients';
         this.prescriptionsKey = 'prescriptions';
         this.solutionsKey = 'solutions';
+        this.componentsKey = 'components'; /* [NOVO] */
         this.preparationCounterKey = 'preparationCounter';
         this.settingsKey = 'settings';
         this.userNameKey = 'userName';
@@ -49,9 +163,9 @@ class DataManager {
         } catch (error) {
             console.error(`DataManager: Error saving data for key '${key}':`, error);
             if (error.name === 'QuotaExceededError') {
-                this.displayNotification('Erro ao salvar dados: Espaço de armazenamento local (localStorage) esgotado. Exporte os dados e limpe o cache do navegador ou contacte o suporte.', 'error');
+                this.displayNotification('Erro ao guardar dados: Espaço de armazenamento local (localStorage) esgotado. Exporte os dados e limpe a cache do navegador ou contacte o suporte.', 'error');
             } else {
-                this.displayNotification('Erro ao salvar dados localmente. Verifique o console para detalhes.', 'error');
+                this.displayNotification('Erro ao guardar dados localmente. Verifique o console para detalhes.', 'error');
             }
         }
     }
@@ -66,9 +180,11 @@ class DataManager {
 
     exportAllDataToFile() {
         const allData = {
+            version: APP_VERSION,
             patients: this.getPatients(),
             prescriptions: this.getPrescriptions(),
             solutions: this.getSolutions(),
+            components: this.getComponents(), /* [NOVO] */
             settings: this.getSettings(),
             userName: this.getUserName(),
             auditLogs: this.getAuditLogs()
@@ -106,6 +222,15 @@ class DataManager {
 
     saveSolutions(solutions) {
         this.saveData(this.solutionsKey, solutions);
+    }
+
+    /* [NOVO] */
+    getComponents() {
+        return this.getData(this.componentsKey) || [];
+    }
+
+    saveComponents(components) {
+        this.saveData(this.componentsKey, components);
     }
 
     getSettings() {
@@ -199,9 +324,13 @@ class DataManager {
         try {
             let importedSomething = false;
             if (dataType === 'all') {
+                if (jsonData.version && jsonData.version !== APP_VERSION) {
+                    this.displayNotification(`Aviso: versão dos dados (${jsonData.version}) diferente da versão da aplicação (${APP_VERSION}).`, 'warning');
+                }
                 if (jsonData.patients && Array.isArray(jsonData.patients)) { this.savePatients(jsonData.patients); importedSomething = true; }
                 if (jsonData.prescriptions && Array.isArray(jsonData.prescriptions)) { this.savePrescriptions(jsonData.prescriptions); importedSomething = true; }
                 if (jsonData.solutions && typeof jsonData.solutions === 'object') { this.saveSolutions(jsonData.solutions); importedSomething = true; }
+                if (jsonData.components && Array.isArray(jsonData.components)) { this.saveComponents(jsonData.components); importedSomething = true; } /* [NOVO] */
                 if (jsonData.settings && typeof jsonData.settings === 'object') { this.saveSettings(jsonData.settings); importedSomething = true; }
                 if (jsonData.userName && typeof jsonData.userName === 'string') { this.saveUserName(jsonData.userName); importedSomething = true; }
                 if (jsonData.auditLogs && Array.isArray(jsonData.auditLogs)) { this.saveAuditLogs(jsonData.auditLogs); importedSomething = true; }
@@ -232,7 +361,7 @@ class DataManager {
     displayNotification(message, type = 'info') {
         const prefix = type.toUpperCase();
         console.log(`[${prefix}] Notification: ${message}`);
-        alert(`${prefix}: ${message}`);
+        showToast(message, type);
     }
 }
 
@@ -254,7 +383,7 @@ class NutriSoft {
         console.log("NutriSoft constructor starting...");
         this.dataManager = new DataManager();
         this.patients = []; this.prescriptions = []; this.solutions = {}; this.settings = {}; this.userName = '';
-        this.currentPrescriptionIndex = null; this.autoSaveInterval = null; this.evolutionChartInstance = null; this.components = {};
+        this.currentPrescriptionIndex = null; this.autoSaveInterval = null; this.evolutionChartInstance = null; this.components = [];
         this.loadInitialData();
         this.applySettings();
         if (Object.keys(this.solutions).length === 0) { console.log("Initializing default solutions..."); this.initSolutions(); }
@@ -267,7 +396,8 @@ class NutriSoft {
             'handleRouteChange', 'handleDataImport', 'handleSettingsImport', 'handlePrescriptionAction',
             'handleReportsAction', 'handleSolutionsAction', 'saveSettings', 'addPatient',
             'clearPatientForm', 'calculateFormulation', 'savePrescription', 'printPrescription',
-            'saveSolution', 'clearSolutionForm', 'handlePatientListAction'
+            'saveSolution', 'clearSolutionForm', 'handlePatientListAction',
+            'addComponent', 'clearComponentForm', 'handleComponentListAction', 'renderComponents'
         ];
         methodsToBind.forEach(method => {
             if (typeof this[method] === 'function') {
@@ -278,19 +408,73 @@ class NutriSoft {
         });
     }
 
-    loadInitialData() { 
+    loadInitialData() {
         console.log("NutriSoft.loadInitialData starting...");
         this.patients = this.dataManager.getPatients();
         this.prescriptions = this.dataManager.getPrescriptions();
         this.solutions = this.dataManager.getSolutions();
+        this.components = this.dataManager.getComponents(); /* [NOVO] */
         this.settings = this.dataManager.getSettings(); // Ensure settings are loaded early
         this.userName = this.dataManager.getUserName();
+        this.syncComponentsToSolutions(); /* [NOVO] ensure components reflected in solutions */
         console.log("NutriSoft.loadInitialData finished. Patients:", this.patients.length, "Prescriptions:", this.prescriptions.length, "Solutions:", Object.keys(this.solutions).length);
+    }
+
+    /* [NOVO] merge componentes na lista de solucoes para uso em selects */
+    syncComponentsToSolutions() {
+        this.components.forEach(c => {
+            this.solutions[c.name] = {
+                ...(this.solutions[c.name] || {}),
+                type: c.type,
+                unit: c.unit,
+                concentration: c.concentration,
+                osmolarityContribution: c.osmolarity
+            };
+        });
+        this.dataManager.saveSolutions(this.solutions);
+    }
+
+    /* [NOVO] atualizar dropdowns das solucoes base */
+    updateSolutionSelects() {
+        const mapping = {
+            aminoacid: 'amino-acids-solution',
+            glucose: 'glucose-solution',
+            lipid: 'lipids-solution',
+            sodium: 'nacl-solution',
+            potassium: 'kcl-solution',
+            calcium: 'cacl2-solution',
+            magnesium: 'mgso4-solution',
+            phosphorus: 'phosphorus-solution'
+        };
+        const groups = {
+            aminoacid: [], glucose: [], lipid: [], sodium: [], potassium: [], calcium: [], magnesium: [], phosphorus: []
+        };
+        Object.entries(this.solutions).forEach(([name, sol]) => {
+            if (sol.type === 'aminoacid') groups.aminoacid.push(name);
+            if (sol.type === 'glucose') groups.glucose.push(name);
+            if (sol.type === 'lipid') groups.lipid.push(name);
+            if (sol.sodium_concentration != null) groups.sodium.push(name);
+            if (sol.potassium_concentration != null) groups.potassium.push(name);
+            if (sol.calcium_concentration != null) groups.calcium.push(name);
+            if (sol.magnesium_concentration != null) groups.magnesium.push(name);
+            if (sol.phosphorus_concentration != null) groups.phosphorus.push(name);
+        });
+        Object.keys(groups).forEach(k => {
+            groups[k].sort((a,b)=> (this.solutions[b].useCount||0) - (this.solutions[a].useCount||0));
+        });
+        Object.entries(mapping).forEach(([key, selId]) => {
+            const sel = document.getElementById(selId);
+            if (!sel) return;
+            const current = sel.value;
+            sel.innerHTML = groups[key].map(v => `<option value="${v}">${v}</option>`).join('');
+            if (groups[key].includes(current)) sel.value = current;
+        });
     }
     init() { 
         console.log("NutriSoft.init starting...");
         this.loadSettings(); // Load settings into UI form
         this.renderUIAllSections(); // Render all dynamic UI parts based on loaded data
+        this.updateSolutionSelects(); /* [NOVO] ensure selects reflect available solutions */
         this.initRouting();
         this.initEventListeners();
         this.initAutoSave(); // Start or stop auto-save based on loaded settings
@@ -305,13 +489,25 @@ class NutriSoft {
         this.setupPrescriptionSearch();
         this.setupReportsSearch();
     }
-    updateUserNameDisplay() { 
+    updateUserNameDisplay() {
         const userNameInput = document.getElementById('user-name');
         if (userNameInput) {
             userNameInput.value = this.userName;
         } else {
             console.warn("updateUserNameDisplay: user-name input field not found.");
         }
+    }
+
+    /* [NOVO] preencher datalist de nomes */
+    updatePatientsDatalist() {
+        const list = document.getElementById('patients-datalist');
+        if (!list) return;
+        list.innerHTML = '';
+        this.patients.forEach(p => {
+            const opt = document.createElement('option');
+            opt.value = p.name;
+            list.appendChild(opt);
+        });
     }
     initSolutions() { 
         // Added osmolarity contribution values (estimates, should be verified)
@@ -387,7 +583,8 @@ class NutriSoft {
                     break;
                 case 'evolution': this.renderEvolutionPatientSelect(); break;
                 case 'solutions': this.renderSolutions(); break;
-                case 'settings': this.renderAuditLogs(); break; 
+                case 'components': this.renderComponents(); break; /* [NOVO] */
+                case 'settings': this.renderAuditLogs(); break;
                 case 'patients':
                      this.renderPatientsList();
                      this.renderPatients(); 
@@ -500,12 +697,12 @@ class NutriSoft {
         settingsNavBtn?.classList.toggle('hidden', !isAdmin);
         solutionsNavBtn?.classList.toggle('hidden', !isAdmin);
 
-        if (exportDataBtn) exportDataBtn.disabled = !(isAdmin || (isPrescriber && permissions.exportData));
+        if (exportDataBtn) exportDataBtn.disabled = false; // [REFATORADO]
         if (exportSettingsBtn) exportSettingsBtn.disabled = !isAdmin;
         if (exportAuditLogsBtn) exportAuditLogsBtn.disabled = !isAdmin;
-        if (importDataBtn) importDataBtn.disabled = !isAdmin;
+        if (importDataBtn) importDataBtn.disabled = false; // [REFATORADO]
         if (importSettingsBtn) importSettingsBtn.disabled = !isAdmin;
-        if (auditLogViewBtn) auditLogViewBtn.classList.toggle('hidden', !isAdmin); 
+        if (auditLogViewBtn) auditLogViewBtn.classList.toggle('hidden', !isAdmin);
 
 
         const canDelete = isAdmin; 
@@ -531,6 +728,13 @@ class NutriSoft {
         document.getElementById('add-patient-btn')?.addEventListener('click', this.addPatient);
         document.getElementById('clear-patient-form-btn')?.addEventListener('click', this.clearPatientForm);
         document.getElementById('patient-dob')?.addEventListener('change', (e) => this.updateAgeDisplay(e.target.value));
+        document.getElementById('patient-weight')?.addEventListener('input', () => {
+            this.updateBMIDisplay();
+            this.updateCaloricNeedsTotal();
+        });
+        document.getElementById('patient-height')?.addEventListener('input', () => this.updateBMIDisplay());
+        document.getElementById('caloric-needs')?.addEventListener('input', () => this.updateCaloricNeedsTotal());
+        document.getElementById('prescription-patient')?.addEventListener('change', () => this.updateCaloricNeedsTotal());
 
         document.getElementById('calculate-formulation-btn')?.addEventListener('click', this.calculateFormulation);
         document.getElementById('save-prescription-btn')?.addEventListener('click', this.savePrescription);
@@ -566,6 +770,9 @@ class NutriSoft {
         document.getElementById('prescription-history-table')?.addEventListener('click', this.handlePrescriptionAction);
         document.getElementById('reports-table')?.addEventListener('click', this.handleReportsAction);
         document.getElementById('solutions-list')?.addEventListener('click', this.handleSolutionsAction);
+        document.getElementById('components-list')?.addEventListener('click', this.handleComponentListAction.bind(this)); /* [NOVO] */
+        document.getElementById('add-component-btn')?.addEventListener('click', this.addComponent.bind(this)); /* [NOVO] */
+        document.getElementById('clear-component-form-btn')?.addEventListener('click', () => this.clearComponentForm()); /* [NOVO] */
         document.getElementById('patients-list')?.addEventListener('click', this.handlePatientListAction.bind(this)); 
 
         document.getElementById('add-solution-btn')?.addEventListener('click', () => this.editSolution()); 
@@ -633,14 +840,17 @@ class NutriSoft {
              this.deletePatient(patientId);
          }
      }
-    confirmExportData(dataType) { 
-        if (confirm(`Deseja exportar ${dataType === 'all' ? 'todos os dados' : dataType === 'settings' ? 'as configurações' : 'os logs de auditoria'} para um ficheiro JSON?`)) {
-            this.dataManager.exportData(dataType);
-            AuditLogger.log('exportDataConfirmed', { type: dataType });
-        } else {
-            AuditLogger.log('exportDataCancelled', { type: dataType });
-            this.dataManager.displayNotification('Exportação cancelada.', 'info');
-        }
+    confirmExportData(dataType) {
+        const msg = `Deseja exportar ${dataType === 'all' ? 'todos os dados' : dataType === 'settings' ? 'as configurações' : 'os logs de auditoria'} para um ficheiro JSON?`;
+        showConfirmationModal(msg, (ok) => {
+            if (ok) {
+                this.dataManager.exportData(dataType);
+                AuditLogger.log('exportDataConfirmed', { type: dataType });
+            } else {
+                AuditLogger.log('exportDataCancelled', { type: dataType });
+                this.dataManager.displayNotification('Exportação cancelada.', 'info');
+            }
+        });
     }
     handleSolutionsAction(event) { 
         const button = event.target.closest('button.table-action-btn');
@@ -756,22 +966,24 @@ class NutriSoft {
                 }
                 const jsonData = JSON.parse(fileContent);
 
-                if (confirm('Atenção: Importar dados substituirá TODOS os dados atuais (doentes, prescrições, soluções, configurações, logs). Deseja continuar?')) {
-                    AuditLogger.log('importDataConfirmed', { type: 'all', filename: file.name });
-                    if (this.dataManager.importData('all', jsonData)) {
-                        this.loadInitialData();       
-                        this.renderUIAllSections();   
-                        this.loadSettings();          
-                        this.updateUserNameDisplay(); 
-                        this.checkAccessPermissions(); 
-                        this.toggleAutoSave();        
-                        this.dataManager.displayNotification('Dados importados com sucesso! A aplicação irá recarregar para garantir consistência.', 'success');
-                        setTimeout(() => window.location.reload(), 2500);
-                    } 
-                } else {
-                    AuditLogger.log('importDataCancelledByUser', { type: 'all', filename: file.name });
-                    this.dataManager.displayNotification('Importação de dados cancelada.', 'info');
-                }
+                showConfirmationModal('Atenção: Importar dados substituirá TODOS os dados atuais (doentes, prescrições, soluções, configurações, logs). Deseja continuar?', (ok) => {
+                    if (ok) {
+                        AuditLogger.log('importDataConfirmed', { type: 'all', filename: file.name });
+                        if (this.dataManager.importData('all', jsonData)) {
+                            this.loadInitialData();
+                            this.renderUIAllSections();
+                            this.loadSettings();
+                            this.updateUserNameDisplay();
+                            this.checkAccessPermissions();
+                            this.toggleAutoSave();
+                            this.dataManager.displayNotification('Dados importados com sucesso! A aplicação irá recarregar para garantir consistência.', 'success');
+                            setTimeout(() => window.location.reload(), 2500);
+                        }
+                    } else {
+                        AuditLogger.log('importDataCancelledByUser', { type: 'all', filename: file.name });
+                        this.dataManager.displayNotification('Importação de dados cancelada.', 'info');
+                    }
+                });
             } catch (error) {
                 console.error('Erro ao processar o ficheiro de importação de dados:', error);
                 AuditLogger.log('importDataError', { type: 'all', filename: file.name, error: error.message });
@@ -802,20 +1014,22 @@ class NutriSoft {
                 }
                 const jsonData = JSON.parse(fileContent);
 
-                if (confirm('Atenção: Importar configurações substituirá as configurações atuais. Deseja continuar?')) {
-                     AuditLogger.log('importSettingsConfirmed', { filename: file.name });
-                    if (this.dataManager.importData('settings', jsonData)) {
-                        this.settings = this.dataManager.getSettings(); 
-                        this.loadSettings(); 
-                        this.checkAccessPermissions(); 
-                        this.toggleAutoSave(); 
-                        AuditLogger.log('importSettingsSuccess', { filename: file.name });
-                        this.dataManager.displayNotification('Configurações importadas com sucesso!', 'success');
-                    } 
-                } else {
-                    AuditLogger.log('importSettingsCancelledByUser', { filename: file.name });
-                    this.dataManager.displayNotification('Importação de configurações cancelada.', 'info');
-                }
+                showConfirmationModal('Atenção: Importar configurações substituirá as configurações atuais. Deseja continuar?', (ok) => {
+                    if (ok) {
+                        AuditLogger.log('importSettingsConfirmed', { filename: file.name });
+                        if (this.dataManager.importData('settings', jsonData)) {
+                            this.settings = this.dataManager.getSettings();
+                            this.loadSettings();
+                            this.checkAccessPermissions();
+                            this.toggleAutoSave();
+                            AuditLogger.log('importSettingsSuccess', { filename: file.name });
+                            this.dataManager.displayNotification('Configurações importadas com sucesso!', 'success');
+                        }
+                    } else {
+                        AuditLogger.log('importSettingsCancelledByUser', { filename: file.name });
+                        this.dataManager.displayNotification('Importação de configurações cancelada.', 'info');
+                    }
+                });
             } catch (error) {
                 console.error('Erro ao processar o ficheiro de importação de configurações:', error);
                 AuditLogger.log('importSettingsError', { filename: file.name, error: error.message });
@@ -834,12 +1048,14 @@ class NutriSoft {
     }
     renderUIAllSections() { 
         console.log("NutriSoft.renderUIAllSections: Rendering all dynamic UI content...");
-        this.renderPatients(); 
-        this.renderPatientsList(); 
+        this.renderPatients();
+        this.renderPatientsList();
+        this.updatePatientsDatalist(); /* [NOVO] */
         this.renderPrescriptionHistory(); 
         this.renderReports(); 
-        this.renderSolutions(); 
-        this.renderEvolutionPatientSelect(); 
+        this.renderSolutions();
+        this.renderComponents(); /* [NOVO] */
+        this.renderEvolutionPatientSelect();
         console.log("NutriSoft.renderUIAllSections: All sections rendering process initiated.");
     }
     renderSolutions() { 
@@ -997,7 +1213,8 @@ class NutriSoft {
                 <button data-action="delete" data-id="${patient.id}" class="table-action-btn text-red-600 hover:text-red-800 focus:outline-none focus:ring-2 focus:ring-red-500" title="Eliminar Doente"><i class="fas fa-trash"></i></button>
             `;
         });
-        this.checkAccessPermissions(); 
+        this.checkAccessPermissions();
+        this.updatePatientsDatalist(); /* [NOVO] */
     }
     renderPatientEvolution(patientId) { 
          const tbody = document.getElementById('patient-evolution-history');
@@ -1111,6 +1328,7 @@ class NutriSoft {
             fieldsToValidate.push({ id: 'patient-dob', type: 'date', message: 'Data de nascimento inválida.' }); 
         } else if (section === 'prescription') {
             fieldsToValidate.push({ id: 'prescription-patient', required: true, message: 'Selecione o doente.' });
+            fieldsToValidate.push({ id: 'caloric-needs', required: true, type: 'number', min: 10, message: 'Calorias por kg devem ser >= 10.' });
             fieldsToValidate.push({ id: 'total-volume', required: true, type: 'number', min: 1, message: 'Volume total deve ser um número válido maior que zero.' });
             fieldsToValidate.push({ id: 'protein-needs', required: true, type: 'number', min: 0, message: 'Necessidades proteicas devem ser >= 0.' });
             fieldsToValidate.push({ id: 'lipid-needs', required: true, type: 'number', min: 0, message: 'Necessidades lipídicas devem ser >= 0.' });
@@ -1175,6 +1393,11 @@ class NutriSoft {
         });
 
         if (!isValid) {
+            const firstError = document.querySelector('.input-field.error');
+            if (firstError) {
+                firstError.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                firstError.focus();
+            }
             this.dataManager.displayNotification('Existem erros no formulário. Por favor, corrija os campos marcados a vermelho.', 'warning');
         }
         return isValid;
@@ -1225,11 +1448,61 @@ class NutriSoft {
             return '';
         }
     }
-    updateAgeDisplay(dobValue) { 
+    updateAgeDisplay(dobValue) {
         const ageDisplay = document.getElementById('patient-age-display');
         if (ageDisplay) {
             ageDisplay.textContent = this.calculateAge(dobValue);
-        } 
+        }
+    }
+
+    calculateBMI(weight, heightCm) {
+        const h = heightCm / 100;
+        if (weight > 0 && h > 0) {
+            return weight / (h * h);
+        }
+        return NaN;
+    }
+
+    updateBMIDisplay() {
+        const weight = parseFloat(document.getElementById('patient-weight')?.value);
+        const height = parseFloat(document.getElementById('patient-height')?.value);
+        const bmiDisplay = document.getElementById('patient-bmi-display');
+        if (!bmiDisplay) return;
+        const bmi = this.calculateBMI(weight, height);
+        bmiDisplay.textContent = isNaN(bmi) ? '' : `IMC: ${bmi.toFixed(1)}`;
+    }
+
+    updateCaloricNeedsTotal() {
+        const kcalPerKg = parseFloat(document.getElementById('caloric-needs')?.value);
+        const patientId = parseInt(document.getElementById('prescription-patient')?.value);
+        const patient = this.patients.find(p => p.id === patientId);
+        const weight = patient?.weight ?? 0;
+        const totalKcal = (weight > 0 && kcalPerKg > 0) ? weight * kcalPerKg : 0;
+        const totalField = document.getElementById('caloric-needs-total');
+        if (totalField) totalField.value = totalKcal ? totalKcal.toFixed(0) : '';
+
+        const macroSuggestion = document.getElementById('macro-suggestion');
+        if (weight > 0 && totalKcal > 0) {
+            // valores baseados em recomendações ESPEN (aprox.)
+            const protKcal = totalKcal * 0.20;
+            const lipKcal = totalKcal * 0.30;
+            const gluKcal = totalKcal * 0.50;
+            const protPerKg = protKcal / 4 / weight;
+            const lipPerKg = lipKcal / 9 / weight;
+            const gluRate = ((gluKcal / 3.4) * 1000) / (weight * 1440);
+            this.setInputValue('protein-needs', protPerKg.toFixed(2));
+            this.setInputValue('lipid-needs', lipPerKg.toFixed(2));
+            this.setInputValue('glucose-rate', gluRate.toFixed(2));
+            const protG = protKcal / 4;
+            const lipG = lipKcal / 9;
+            const gluG = gluKcal / 3.4;
+            if (macroSuggestion) {
+                macroSuggestion.textContent =
+                    `Distribuição sugerida: ${protG.toFixed(1)}g proteína, ${lipG.toFixed(1)}g lípidos, ${gluG.toFixed(1)}g glicose`;
+            }
+        } else if (macroSuggestion) {
+            macroSuggestion.textContent = '';
+        }
     }
     addPatient() { 
         console.log("NutriSoft.addPatient: Attempting to add/edit patient.");
@@ -1274,6 +1547,7 @@ class NutriSoft {
             }
 
             this.dataManager.savePatients(this.patients);
+            EventBus.emit('patientsChanged', this.patients); /* [NOVO] */
             AuditLogger.log(logAction, { patientId: patientData.id, name: patientData.name });
             this.dataManager.displayNotification(userFeedback, 'success');
             this.renderPatients(); 
@@ -1283,7 +1557,7 @@ class NutriSoft {
             console.log(`NutriSoft.addPatient: Patient ${logAction} successful. ID: ${patientData.id}`);
         } catch (error) {
             console.error("NutriSoft.addPatient: Error during add/edit patient:", error);
-            this.dataManager.displayNotification('Erro ao salvar doente. Verifique os dados e tente novamente. Detalhes no console.', 'error');
+            this.dataManager.displayNotification('Erro ao guardar doente. Verifique os dados e tente novamente. Detalhes no console.', 'error');
             AuditLogger.log('addEditPatientError', { error: error.message, inputId: editingId });
         }
     }
@@ -1301,11 +1575,12 @@ class NutriSoft {
         document.getElementById('patient-weight').value = patient.weight ?? '';
         document.getElementById('patient-height').value = patient.height ?? '';
         document.getElementById('patient-condition').value = patient.condition || '';
-        document.getElementById('patient-id').value = patient.id; 
+        document.getElementById('patient-id').value = patient.id;
 
         this.updateAgeDisplay(patient.dob);
+        this.updateBMIDisplay();
         document.getElementById('patients-section')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        document.getElementById('patient-name')?.focus(); 
+        document.getElementById('patient-name')?.focus();
     }
     deletePatient(patientId) { 
         const patient = this.patients.find(p => p.id === patientId);
@@ -1318,9 +1593,10 @@ class NutriSoft {
             confirmationMessage += `\n\nAtenção: Esta ação irá também excluir ${associatedPrescriptions} prescrição(ões) associada(s) a este doente.`;
         }
 
-        if (confirm(confirmationMessage)) {
+        showConfirmationModal(confirmationMessage, (ok) => {
+            if (!ok) { AuditLogger.log('deletePatientCancelled', { patientId: patientId, patientName: patient.name }); console.log(`NutriSoft.deletePatient: Deletion of patient ID ${patientId} cancelled by user.`); return; }
             console.log(`NutriSoft.deletePatient: Deleting patient ID ${patientId} and associated prescriptions.`);
-            const patientName = patient.name; 
+            const patientName = patient.name;
             this.patients = this.patients.filter(p => p.id !== patientId);
 
             const originalPrescriptionCount = this.prescriptions.length;
@@ -1329,6 +1605,7 @@ class NutriSoft {
 
             this.dataManager.savePatients(this.patients);
             this.dataManager.savePrescriptions(this.prescriptions);
+            EventBus.emit('patientsChanged', this.patients); /* [NOVO] */
 
             AuditLogger.log('deletePatient', { patientId: patientId, patientName: patientName, deletedPrescriptions: deletedPrescriptionsCount });
             this.dataManager.displayNotification(`Doente "${patientName}" e ${deletedPrescriptionsCount} prescrição(ões) associada(s) foram excluído(s) com sucesso!`, 'success');
@@ -1338,11 +1615,8 @@ class NutriSoft {
             this.renderEvolutionPatientSelect(); 
             this.renderReports();
             this.renderPrescriptionHistory();
-            this.clearPatientForm(); 
-        } else {
-             AuditLogger.log('deletePatientCancelled', { patientId: patientId, patientName: patient.name });
-             console.log(`NutriSoft.deletePatient: Deletion of patient ID ${patientId} cancelled by user.`);
-        }
+            this.clearPatientForm();
+        });
     }
     clearPatientForm(logAction = true) { 
         console.log("NutriSoft.clearPatientForm: Clearing patient form.");
@@ -1358,6 +1632,8 @@ class NutriSoft {
         }
         const ageDisplay = document.getElementById('patient-age-display');
         if (ageDisplay) ageDisplay.textContent = '';
+        const bmiDisplay = document.getElementById('patient-bmi-display');
+        if (bmiDisplay) bmiDisplay.textContent = '';
 
         if (logAction) AuditLogger.log('clearPatientForm');
     }
@@ -1839,9 +2115,13 @@ class NutriSoft {
         }
 
         try {
+            const kcalPerKg = this.getNumericInput('caloric-needs', 0, true);
+            const totalKcal = (patient.weight > 0 && kcalPerKg > 0) ? patient.weight * kcalPerKg : 0;
+
             const formulation = {
-                patient: patient, 
+                patient: patient,
                 volume: totalVolume, // Prescribed total volume
+                totalKcal: totalKcal,
                 route: administrationRoute,
                 proteins: this.calculateProteins(patient),
                 glucose: this.calculateGlucose(patient),
@@ -2102,7 +2382,7 @@ class NutriSoft {
             return "Erro interno ao gerar mapa de preparação. Verifique o console.";
         }
     }
-    savePrescription() { 
+    async savePrescription() {
         console.log("NutriSoft.savePrescription: Attempting to save prescription...");
         this.userName = document.getElementById('user-name')?.value.trim() || this.dataManager.getUserName();
         if(this.userName !== this.dataManager.getUserName()) { 
@@ -2122,9 +2402,11 @@ class NutriSoft {
             return;
         }
         if (formulation.warnings && formulation.warnings.length > 0) {
-            if (!confirm(`A formulação calculada tem ${formulation.warnings.length} aviso(s).\n\nExemplo: "${formulation.warnings[0]}"\n\nDeseja salvar a prescrição mesmo assim?`)) {
+            const msg = `A formulação calculada tem ${formulation.warnings.length} aviso(s).\n\nExemplo: \"${formulation.warnings[0]}\"\n\nDeseja guardar a prescrição mesmo assim?`;
+            const proceed = await confirmAsync(msg);
+            if (!proceed) {
                 AuditLogger.log('savePrescriptionCancelledDueToWarnings', { patientId: formulation.patient.id, warningsCount: formulation.warnings.length });
-                this.dataManager.displayNotification('Salvamento da prescrição cancelado pelo utilizador devido a avisos.', 'info');
+                this.dataManager.displayNotification('Operação cancelada pelo utilizador devido a avisos.', 'info');
                 return;
             }
             AuditLogger.log('savePrescriptionConfirmedWithWarnings', { patientId: formulation.patient.id, warnings: formulation.warnings.length });
@@ -2135,7 +2417,7 @@ class NutriSoft {
 
         const preparation = {
             preparationNumber: existingPrescription ? existingPrescription.preparationNumber : this.dataManager.getNextPreparationNumber(),
-            patientId: formulation.patient.id, 
+            patientId: formulation.patient.id,
             patientName: formulation.patient.name, 
             date: new Date().toISOString().split('T')[0], 
             volume: formulation.volume,
@@ -2144,8 +2426,24 @@ class NutriSoft {
             formulation: formulation, 
             createdBy: this.userName,
             createdAt: existingPrescription ? existingPrescription.createdAt : new Date().toISOString(), 
-            updatedAt: new Date().toISOString() 
+            updatedAt: new Date().toISOString()
         };
+
+        // [NEW] increment solution usage counters
+        const solutionNames = [
+            formulation.proteins?.solution,
+            formulation.glutamine?.solution,
+            formulation.glucose?.solution,
+            formulation.lipids?.solution,
+            ...(Object.values(formulation.electrolytes || {}).map(c => c.solution)),
+            ...(Object.values(formulation.additives || {}).map(c => c.solution))
+        ].filter(Boolean);
+        solutionNames.forEach(name => {
+            if (this.solutions[name]) {
+                this.solutions[name].useCount = (this.solutions[name].useCount || 0) + 1;
+            }
+        });
+        this.dataManager.saveSolutions(this.solutions);
 
         let logAction = ''; let userFeedback = '';
         if (isEditing) {
@@ -2344,6 +2642,9 @@ class NutriSoft {
         const patientWeight = formulation.patient?.weight ?? 0;
 
         this.setInputValue('prescription-patient', patientId);
+        const kcalPerKg = patientWeight > 0 ? (formulation.totalKcal / patientWeight) : '';
+        this.setInputValue('caloric-needs', kcalPerKg ? kcalPerKg.toFixed(0) : '');
+        this.setInputValue('caloric-needs-total', formulation.totalKcal ?? '');
         this.setInputValue('total-volume', formulation.volume);
         this.setInputValue('administration-route', formulation.route || 'central');
 
@@ -2387,6 +2688,7 @@ class NutriSoft {
         this.setInputValue('cacl2-solution', formulation.electrolytes?.calcium?.solution); 
         this.setInputValue('mgso4-solution', formulation.electrolytes?.magnesium?.solution);
         this.setInputValue('phosphorus-solution', formulation.electrolytes?.phosphorus?.solution);
+        this.updateCaloricNeedsTotal();
     }
     printPrescription(originalIndex = null) { 
         console.log("NutriSoft.printPrescription: Preparing to print. Original Index:", originalIndex);
@@ -2453,10 +2755,11 @@ class NutriSoft {
             return;
          }
         const p = this.prescriptions[originalIndex];
-        if (confirm(`Tem a certeza que deseja excluir a prescrição #${p.preparationNumber} para "${p.patientName || 'Doente Desconhecido'}"? Esta ação é irreversível.`)) {
+        showConfirmationModal(`Tem a certeza que deseja excluir a prescrição #${p.preparationNumber} para "${p.patientName || 'Doente Desconhecido'}"? Esta ação é irreversível.`, (ok) => {
+            if (!ok) { AuditLogger.log('deletePrescriptionCancelled', { prepId: p.preparationNumber }); return; }
             console.log(`NutriSoft.deletePrescription: Deleting prescription ID ${p.preparationNumber}.`);
-            this.prescriptions.splice(originalIndex, 1); 
-            this.dataManager.savePrescriptions(this.prescriptions); 
+            this.prescriptions.splice(originalIndex, 1);
+            this.dataManager.savePrescriptions(this.prescriptions);
 
             AuditLogger.log('deletePrescriptionConfirmed', { prepId: p.preparationNumber, patientId: p.patientId });
             this.dataManager.displayNotification(`Prescrição #${p.preparationNumber} excluída com sucesso!`, 'success');
@@ -2471,15 +2774,12 @@ class NutriSoft {
 
             if (this.currentPrescriptionIndex === originalIndex) {
                 this.currentPrescriptionIndex = null;
-                this.disablePrescriptionForm(true); 
+                this.disablePrescriptionForm(true);
                 document.getElementById('formulation-results')?.classList.add('hidden');
             } else if (this.currentPrescriptionIndex !== null && this.currentPrescriptionIndex > originalIndex) {
-                this.currentPrescriptionIndex--; 
+                this.currentPrescriptionIndex--;
             }
-        } else {
-            AuditLogger.log('deletePrescriptionCancelled', { prepId: p.preparationNumber });
-            console.log(`NutriSoft.deletePrescription: Deletion of prescription ID ${p.preparationNumber} cancelled by user.`);
-        }
+        });
     }
     setupPatientSearch() { 
         const searchInput = document.getElementById('patient-search-input');
@@ -2533,119 +2833,73 @@ class NutriSoft {
 
         if (noResultsRow) {
             noResultsRow.classList.toggle('hidden', foundMatch);
-            if(!foundMatch){ 
+            if(!foundMatch){
                  const td = noResultsRow.querySelector('td');
                  if(td) td.colSpan = colspan;
             }
         }
     }
-    exportPDF(formulation, preparationMap, preparationNumber, patientName, prescriptionDate) { 
+
+    // [NEW] Export PDF with professional layout using jsPDF and AutoTable
+    exportPDF(formulation, preparationMap, prepNumber, patientName, prescriptionDate) {
         try {
-            if (!window.jspdf || !window.jspdf.jsPDF) {
-                console.error("jsPDF library is not loaded. Cannot generate PDF.");
-                this.dataManager.displayNotification("Erro: Biblioteca jsPDF não carregada.", "error");
+            if (!window.jspdf?.jsPDF?.API?.autoTable) {
+                this.dataManager.displayNotification('Erro: jsPDF ou AutoTable não carregados.', 'error');
                 return;
             }
             const { jsPDF } = window.jspdf;
             const doc = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4' });
-
             const pageWidth = doc.internal.pageSize.getWidth();
-            const pageHeight = doc.internal.pageSize.getHeight();
-            const margin = 10;
-            const usableWidth = pageWidth - 2 * margin;
+            const margin = 15;
             let y = margin;
-            const lineSpacing = 5; 
-            const sectionSpacing = 8;
 
-            const addWrappedText = (text, x, currentY, options = {}) => {
-                const { fontSize = 10, fontStyle = 'normal', maxWidth = usableWidth, color = [0,0,0] } = options;
-                doc.setFontSize(fontSize);
-                doc.setFont(undefined, fontStyle);
-                doc.setTextColor(color[0], color[1], color[2]);
+            if (LOGO_DATA_URL) doc.addImage(LOGO_DATA_URL, 'JPEG', margin, y, 20, 20);
+            doc.setFontSize(12).setFont(undefined, 'bold');
+            doc.text('MAPA DE PREPARAÇÃO – NUTRIÇÃO PARENTÉRICA', pageWidth / 2, y + 10, { align: 'center' });
+            doc.setFontSize(10).setFont(undefined, 'normal');
+            doc.text(`Prep nº ${prepNumber}`, pageWidth - margin, y + 4, { align: 'right' });
+            doc.text(new Date(prescriptionDate).toLocaleDateString(), pageWidth - margin, y + 9, { align: 'right' });
+            doc.text(`HN: ${formulation.patient?.id || ''}`, pageWidth - margin, y + 14, { align: 'right' });
+            y += 22;
 
-                const lines = doc.splitTextToSize(text, maxWidth);
-                doc.text(lines, x, currentY);
-                return currentY + (lines.length * (fontSize * 0.352778 * 1.2)); 
-            };
+            const tableData = this.buildCompositionTable(formulation);
+            doc.autoTable({
+                startY: y,
+                head: [['Componente', 'Qtd.', 'mL a adicionar']],
+                body: tableData,
+                theme: 'grid',
+                styles: { fontSize: 9 },
+                headStyles: { fillColor: [148,163,184] },
+                alternateRowStyles: { fillColor: [243,244,246] },
+                columnStyles: { 2: { fontStyle: 'bold', textColor: [30,64,175] } },
+                didDrawPage: data => {
+                    const ph = doc.internal.pageSize.getHeight();
+                    doc.setFontSize(8);
+                    doc.text('Elaborado por ________', margin, ph - 10);
+                    doc.text(`Página ${data.pageNumber} de ${doc.internal.getNumberOfPages()}`, pageWidth - margin, ph - 10, { align: 'right' });
+                }
+            });
 
-            doc.setFontSize(16); doc.setFont(undefined, 'bold');
-            doc.text('Prescrição de Nutrição Parentérica', pageWidth / 2, y, { align: 'center' });
-            y += lineSpacing * 2;
-
-            doc.setFontSize(10); doc.setFont(undefined, 'normal');
-            doc.text(`Número Preparação: ${preparationNumber}`, margin, y);
-            let displayDate = 'N/A';
-            try { displayDate = prescriptionDate ? new Date(prescriptionDate).toLocaleDateString() : new Date().toLocaleDateString(); } catch {}
-            doc.text(`Data Prescrição: ${displayDate}`, pageWidth - margin, y, { align: 'right' });
-            y += lineSpacing * 1.5;
-
-            doc.text(`Paciente: ${patientName || 'N/A'}`, margin, y);
-            doc.text(`Peso: ${formulation.patient?.weight ?? '?'} kg`, pageWidth - margin, y, { align: 'right' });
-            y += lineSpacing * 1.5;
-            doc.line(margin, y, pageWidth - margin, y); 
-            y += lineSpacing;
-
-
-            doc.setFontSize(12); doc.setFont(undefined, 'bold');
-            doc.text('Detalhes da Formulação:', margin, y);
-            y += lineSpacing;
-            const formulationDetailsText = this.formatCompositionDetailsForPDF(formulation);
-            y = addWrappedText(formulationDetailsText, margin, y, { fontSize: 9 });
-            y += sectionSpacing;
-
-            if (y > pageHeight - margin * 3) { doc.addPage(); y = margin; } 
-
-            doc.setFontSize(12); doc.setFont(undefined, 'bold');
-            doc.text('Mapa de Preparação (Ordem Sugerida):', margin, y);
-            y += lineSpacing;
-            y = addWrappedText(preparationMap, margin, y, { fontSize: 8.5, fontStyle: 'courier' }); 
-            y += sectionSpacing;
-
-            if (y > pageHeight - margin * 3) { doc.addPage(); y = margin; }
-
-            if (formulation.warnings?.length > 0) {
-                doc.setFontSize(12); doc.setFont(undefined, 'bold');
-                y = addWrappedText('Avisos da Formulação:', margin, y, { color: [255, 100, 0] }); 
-                y += lineSpacing * 0.5;
-                y = addWrappedText(formulation.warnings.map(w => `- ${w}`).join('\n'), margin, y, { fontSize: 9 });
-                y += sectionSpacing;
-                if (y > pageHeight - margin * 3) { doc.addPage(); y = margin; }
+            const limit = this.settings.osmolarityLimits[formulation.route] || 0;
+            let nextY = doc.lastAutoTable.finalY + 6;
+            if (formulation.osmolarity > limit) {
+                doc.setTextColor(220,38,38);
+                doc.text('⚠︎ Osmolaridade Alta', margin, nextY);
+                doc.setTextColor(0,0,0);
+                nextY += 6;
             }
 
-            if (formulation.errors?.length > 0) {
-                doc.setFontSize(12); doc.setFont(undefined, 'bold');
-                y = addWrappedText('ERROS CRÍTICOS:', margin, y, { color: [255, 0, 0] }); 
-                y += lineSpacing * 0.5;
-                y = addWrappedText(formulation.errors.map(e => `- ${e}`).join('\n'), margin, y, { fontSize: 9 });
-                y += sectionSpacing;
-                if (y > pageHeight - margin * 3) { doc.addPage(); y = margin; }
-            }
+            doc.text(preparationMap, margin, nextY);
 
-            y = Math.max(y, pageHeight - margin - 30); 
-            if (y > pageHeight - margin - 30) { 
-                 if (pageHeight - y < 30) { 
-                    doc.addPage(); y = margin;
-                 }
-            } else {
-                y = pageHeight - margin - 30; 
-            }
-
-            doc.setFontSize(10);
-            doc.text('Prescrito por: _________________________', margin, y);
-            doc.text('Conferido por (Farm.): _________________________', pageWidth / 2, y, {align: 'left'});
-            y += lineSpacing * 2;
-            doc.text(`Data Impressão: ${new Date().toLocaleString()}`, margin, y);
-
-            const filename = `Prescricao_NP_${String(preparationNumber).replace(/\W/g, '')}_${patientName.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}.pdf`;
-            doc.save(filename);
-            console.log("PDF generated:", filename);
-        } catch (error) {
-            console.error("NutriSoft.exportPDF: Erro ao gerar PDF:", error);
-            this.dataManager.displayNotification(`Erro ao gerar PDF: ${error.message}. Verifique o console.`, 'error');
-            AuditLogger.log('exportPDFError', { prepId: preparationNumber, error: error.message, stack: error.stack });
+            const blobUrl = doc.output('bloburl');
+            showPDFPreview(blobUrl, `prep_${prepNumber}.pdf`, doc);
+            AuditLogger.log('pdfGenerated', { prepNum: prepNumber, user: this.dataManager.getUserName() });
+        } catch (e) {
+            console.error('exportPDF error', e);
+            this.dataManager.displayNotification(`Erro ao gerar PDF: ${e.message}`, 'error');
         }
     }
-    formatCompositionDetailsForPDF(formulation) { 
+    formatCompositionDetailsForPDF(formulation) {
         const details = [];
         const formatLine = (label, component, valueKey = 'volume', unit = 'ml', dp = 2) => {
              if (!component || component[valueKey] === undefined || component[valueKey] === null || (component[valueKey] === 0 && (label.toLowerCase().includes('volume') || unit ==='ml'))) return null; 
@@ -2703,6 +2957,44 @@ class NutriSoft {
 
         return details.filter(line => line !== null).join('\n');
     }
+
+    // [NEW] build tabular data for jsPDF AutoTable
+    buildCompositionTable(formulation) {
+        const rows = [];
+        const pushRow = (label, comp, valueKey = 'volume', unit = 'ml') => {
+            if (!comp) return;
+            const val = comp[valueKey];
+            if (val === undefined || val === null) return;
+            const vol = comp.volume !== undefined ? comp.volume : null;
+            if (val === 0 && (valueKey === 'volume' || unit === 'ml')) return;
+            rows.push([
+                label,
+                valueKey !== 'volume' ? this.formatValue(val, unit, unit === 'ml' ? 0 : 2) : '',
+                vol !== null ? this.formatValue(vol, 'ml', 0) : ''
+            ]);
+        };
+        pushRow('Aminoácidos', formulation.proteins, 'required', 'g');
+        if (formulation.glutamine?.volume > 0) {
+            pushRow('Glutamina', formulation.glutamine, 'required_g_dipeptide', 'g');
+        }
+        pushRow('Glucose', formulation.glucose, 'required', 'g');
+        pushRow('Lípidos', formulation.lipids, 'required', 'g');
+        Object.entries(formulation.electrolytes || {}).forEach(([key, comp]) => {
+            const name = key.charAt(0).toUpperCase() + key.slice(1);
+            const unit = key === 'phosphorus' ? 'mmol' : 'mEq';
+            pushRow(name, comp, 'required', unit);
+        });
+        Object.entries(formulation.additives || {}).forEach(([key, comp]) => {
+            let label = key.charAt(0).toUpperCase() + key.slice(1).replace(/_/g,' ');
+            let unit = 'ml';
+            let valKey = 'volume';
+            if (key === 'insulin' || key === 'heparin') { unit = 'UI'; valKey = 'required'; }
+            else if (key === 'carnitine') { unit = 'mg'; valKey = 'required'; }
+            pushRow(label, comp, valKey, unit);
+        });
+        pushRow('Água Estéril', formulation.water, 'volume', 'ml');
+        return rows;
+    }
     addLabelContent(doc, formulation, startX, startY, isLipidsLabel, preparationNumber, patientName, prescriptionDate) { 
         const labelWidth = 90; const labelHeight = 50; const padding = 5;
         const textStartX = startX + padding;
@@ -2719,7 +3011,7 @@ class NutriSoft {
 
         const maxNameWidthChars = 35; 
         const displayName = patientName.length > maxNameWidthChars ? patientName.substring(0, maxNameWidthChars) + "..." : patientName;
-        doc.text(`Paciente: ${displayName}`, textStartX, currentY); currentY += lineSpacingLabel * 1.1;
+        doc.text(`Doente: ${displayName}`, textStartX, currentY); currentY += lineSpacingLabel * 1.1;
 
         doc.setFontSize(9); doc.setFont(undefined, 'bold');
         let bagType = 'BOLSA ÚNICA (3-em-1)';
@@ -2933,12 +3225,13 @@ class NutriSoft {
             userFeedback = `Solução "${newName}" adicionada com sucesso!`;
         }
         this.solutions = solutionsUpdate; 
-        this.dataManager.saveSolutions(this.solutions); 
+        this.dataManager.saveSolutions(this.solutions);
 
         AuditLogger.log(logAction, logDetails);
         this.dataManager.displayNotification(userFeedback, 'success');
-        this.renderSolutions(); 
-        this.clearSolutionForm(true); 
+        this.renderSolutions();
+        this.updateSolutionSelects(); /* [NOVO] */
+        this.clearSolutionForm(true);
         console.log(`NutriSoft.saveSolution: Solution ${logAction} successful for:`, newName);
     }
     deleteSolution(solutionName) { 
@@ -2946,22 +3239,21 @@ class NutriSoft {
             this.dataManager.displayNotification('Solução não encontrada para exclusão.', 'warning');
             return;
         }
-        if (confirm(`Tem a certeza que deseja excluir a solução "${solutionName}"? Esta ação não pode ser desfeita.`)) {
+        showConfirmationModal(`Tem a certeza que deseja excluir a solução "${solutionName}"? Esta ação não pode ser desfeita.`, (ok) => {
+            if (!ok) { AuditLogger.log('deleteSolutionCancelled', { solutionName }); return; }
             console.log(`NutriSoft.deleteSolution: Deleting solution: ${solutionName}`);
             let solutionsUpdate = { ...this.solutions };
             delete solutionsUpdate[solutionName];
-            this.solutions = solutionsUpdate; 
-            this.dataManager.saveSolutions(this.solutions); 
+            this.solutions = solutionsUpdate;
+            this.dataManager.saveSolutions(this.solutions);
 
             AuditLogger.log('deleteSolutionConfirmed', { solutionName });
             this.dataManager.displayNotification(`Solução "${solutionName}" excluída com sucesso!`, 'success');
-            this.renderSolutions(); 
-        } else {
-            AuditLogger.log('deleteSolutionCancelled', { solutionName });
-            console.log(`NutriSoft.deleteSolution: Deletion of solution ${solutionName} cancelled by user.`);
-        }
+            this.renderSolutions();
+            this.updateSolutionSelects(); /* [NOVO] */
+        });
     }
-    clearSolutionForm(hideModal = true) { 
+    clearSolutionForm(hideModal = true) {
         console.log("NutriSoft.clearSolutionForm: Clearing solution form. Hide modal:", hideModal);
         const form = document.getElementById('solution-form');
         if (form) {
@@ -2984,7 +3276,72 @@ class NutriSoft {
             if (modal) modal.classList.add('hidden');
             document.body.style.overflow = ''; 
             AuditLogger.log('clearSolutionFormAndModal');
-        } 
+        }
+    }
+
+    /* [NOVO] adicionar componente */
+    addComponent() {
+        if (!this.validateInputs('component')) return;
+        const component = {
+            name: document.getElementById('component-name').value.trim(),
+            type: document.getElementById('component-type').value,
+            unit: document.getElementById('component-unit').value,
+            concentration: this.getNumericInput('component-concentration', null),
+            osmolarity: this.getNumericInput('component-osmolarity', null)
+        };
+        const existing = this.components.find(c => c.name === component.name);
+        if (existing) Object.assign(existing, component); else this.components.push(component);
+        this.dataManager.saveComponents(this.components);
+        this.syncComponentsToSolutions(); /* [NOVO] */
+        this.updateSolutionSelects(); /* [NOVO] */
+        EventBus.emit('componentsChanged', this.components);
+        this.renderComponents();
+        this.clearComponentForm();
+    }
+
+    clearComponentForm() {
+        const form = document.getElementById('component-form');
+        form?.reset();
+        form?.querySelectorAll('.input-field').forEach(i => this.hideErrorMessage(i));
+    }
+
+    renderComponents() {
+        const tbody = document.getElementById('components-list');
+        if (!tbody) return;
+        const tpl = tbody.querySelector('.no-results-row');
+        tbody.innerHTML = '';
+        if (tpl) tbody.appendChild(tpl.cloneNode(true));
+        const nr = tbody.querySelector('.no-results-row');
+        if (this.components.length === 0) { nr?.classList.remove('hidden'); return; }
+        nr?.classList.add('hidden');
+        this.components.forEach((c, idx) => {
+            const row = tbody.insertRow();
+            row.insertCell().textContent = c.name;
+            row.insertCell().textContent = c.type;
+            row.insertCell().textContent = c.unit;
+            row.insertCell().textContent = c.concentration ?? '-';
+            row.insertCell().textContent = c.osmolarity ?? '-';
+            const actions = row.insertCell();
+            actions.className = 'text-right';
+            actions.innerHTML = `<button data-action="delete" data-index="${idx}" class="table-action-btn text-red-600"><i class="fas fa-trash"></i></button>`;
+        });
+    }
+
+    deleteComponent(index) {
+        this.components.splice(index, 1);
+        this.dataManager.saveComponents(this.components);
+        this.syncComponentsToSolutions(); /* [NOVO] */
+        this.updateSolutionSelects(); /* [NOVO] */
+        this.renderComponents();
+        EventBus.emit('componentsChanged', this.components);
+    }
+
+    handleComponentListAction(e) {
+        const btn = e.target.closest('button[data-action]');
+        if (!btn) return;
+        if (btn.dataset.action === 'delete') {
+            this.deleteComponent(parseInt(btn.dataset.index));
+        }
     }
 } 
 
@@ -2994,15 +3351,26 @@ let app;
 
 document.addEventListener('DOMContentLoaded', () => {
     console.log("DOM fully loaded and parsed.");
+    initTheme(); /* [NOVO] */
+    preloadLogo(); // [NEW]
     try {
         app = new NutriSoft();
         app.init();
+        EventBus.on('patientsChanged', () => app.updatePatientsDatalist()); /* [NOVO] */
+        EventBus.on('componentsChanged', () => { app.updateSolutionSelects(); }); /* [NOVO] */
         console.log("NutriSoft application instance created and initialized successfully.");
+
+        const themeBtn = document.getElementById('theme-toggle-btn');
+        themeBtn?.addEventListener('click', toggleTheme); /* [NOVO] */
 
         if (!window.location.hash || window.location.hash === "#") {
             console.log("Initial hash is empty or '#', forcing to #patients for robust startup.");
             window.location.hash = 'patients';
         }
+
+        window.addEventListener('beforeunload', () => {
+            try { app.saveAllData(); } catch (e) { console.error('Erro ao gravar dados antes de sair:', e); }
+        });
 
     } catch (error) {
         console.error("FATAL: Error initializing NutriSoft application:", error);
