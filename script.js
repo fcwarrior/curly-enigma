@@ -98,9 +98,9 @@ class DataManager {
         } catch (error) {
             console.error(`DataManager: Error saving data for key '${key}':`, error);
             if (error.name === 'QuotaExceededError') {
-                this.displayNotification('Erro ao salvar dados: Espaço de armazenamento local (localStorage) esgotado. Exporte os dados e limpe o cache do navegador ou contacte o suporte.', 'error');
+                this.displayNotification('Erro ao guardar dados: Espaço de armazenamento local (localStorage) esgotado. Exporte os dados e limpe a cache do navegador ou contacte o suporte.', 'error');
             } else {
-                this.displayNotification('Erro ao salvar dados localmente. Verifique o console para detalhes.', 'error');
+                this.displayNotification('Erro ao guardar dados localmente. Verifique o console para detalhes.', 'error');
             }
         }
     }
@@ -1403,8 +1403,9 @@ class NutriSoft {
 
         const macroSuggestion = document.getElementById('macro-suggestion');
         if (weight > 0 && totalKcal > 0) {
-            const protKcal = totalKcal * 0.18;
-            const lipKcal = totalKcal * 0.32;
+            // valores baseados em recomendações ESPEN (aprox.)
+            const protKcal = totalKcal * 0.20;
+            const lipKcal = totalKcal * 0.30;
             const gluKcal = totalKcal * 0.50;
             const protPerKg = protKcal / 4 / weight;
             const lipPerKg = lipKcal / 9 / weight;
@@ -1476,7 +1477,7 @@ class NutriSoft {
             console.log(`NutriSoft.addPatient: Patient ${logAction} successful. ID: ${patientData.id}`);
         } catch (error) {
             console.error("NutriSoft.addPatient: Error during add/edit patient:", error);
-            this.dataManager.displayNotification('Erro ao salvar doente. Verifique os dados e tente novamente. Detalhes no console.', 'error');
+            this.dataManager.displayNotification('Erro ao guardar doente. Verifique os dados e tente novamente. Detalhes no console.', 'error');
             AuditLogger.log('addEditPatientError', { error: error.message, inputId: editingId });
         }
     }
@@ -2323,9 +2324,9 @@ class NutriSoft {
             return;
         }
         if (formulation.warnings && formulation.warnings.length > 0) {
-            if (!confirm(`A formulação calculada tem ${formulation.warnings.length} aviso(s).\n\nExemplo: "${formulation.warnings[0]}"\n\nDeseja salvar a prescrição mesmo assim?`)) {
+            if (!confirm(`A formulação calculada tem ${formulation.warnings.length} aviso(s).\n\nExemplo: "${formulation.warnings[0]}"\n\nDeseja guardar a prescrição mesmo assim?`)) {
                 AuditLogger.log('savePrescriptionCancelledDueToWarnings', { patientId: formulation.patient.id, warningsCount: formulation.warnings.length });
-                this.dataManager.displayNotification('Salvamento da prescrição cancelado pelo utilizador devido a avisos.', 'info');
+                this.dataManager.displayNotification('Guarda da prescrição cancelada pelo utilizador devido a avisos.', 'info');
                 return;
             }
             AuditLogger.log('savePrescriptionConfirmedWithWarnings', { patientId: formulation.patient.id, warnings: formulation.warnings.length });
@@ -2915,7 +2916,7 @@ class NutriSoft {
 
         const maxNameWidthChars = 35; 
         const displayName = patientName.length > maxNameWidthChars ? patientName.substring(0, maxNameWidthChars) + "..." : patientName;
-        doc.text(`Paciente: ${displayName}`, textStartX, currentY); currentY += lineSpacingLabel * 1.1;
+        doc.text(`Doente: ${displayName}`, textStartX, currentY); currentY += lineSpacingLabel * 1.1;
 
         doc.setFontSize(9); doc.setFont(undefined, 'bold');
         let bagType = 'BOLSA ÚNICA (3-em-1)';
