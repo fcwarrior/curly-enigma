@@ -4,6 +4,8 @@
  * Global application constants
  */
 const APP_VERSION = '1.0.0';
+// [NEW] Preloaded logo data to avoid tainted canvas errors
+let LOGO_DATA_URL = '';
 
 /* [NOVO] Simple event bus */
 const EventBus = {
@@ -24,6 +26,26 @@ function initTheme() {
 function toggleTheme() {
     const isDark = document.documentElement.classList.toggle('dark');
     localStorage.setItem('theme', isDark ? 'dark' : 'light');
+}
+
+// [NEW] Preload logo image as data URL to prevent CORS issues when exporting PDF
+function preloadLogo() {
+    const img = document.getElementById('logo-img');
+    if (!img) return;
+    img.crossOrigin = 'anonymous';
+    if (img.complete) {
+        const canvas = document.createElement('canvas');
+        canvas.width = img.naturalWidth; canvas.height = img.naturalHeight;
+        canvas.getContext('2d').drawImage(img, 0, 0);
+        LOGO_DATA_URL = canvas.toDataURL('image/jpeg');
+    } else {
+        img.onload = () => {
+            const canvas = document.createElement('canvas');
+            canvas.width = img.naturalWidth; canvas.height = img.naturalHeight;
+            canvas.getContext('2d').drawImage(img, 0, 0);
+            LOGO_DATA_URL = canvas.toDataURL('image/jpeg');
+        };
+    }
 }
 
 /**
@@ -2716,130 +2738,72 @@ class NutriSoft {
 
         if (noResultsRow) {
             noResultsRow.classList.toggle('hidden', foundMatch);
-            if(!foundMatch){ 
+            if(!foundMatch){
                  const td = noResultsRow.querySelector('td');
                  if(td) td.colSpan = colspan;
             }
         }
     }
-    exportPDF(formulation, preparationMap, preparationNumber, patientName, prescriptionDate) { 
+
+    // [NEW] Export PDF with professional layout using jsPDF and AutoTable
+    exportPDF(formulation, preparationMap, prepNumber, patientName, prescriptionDate) {
         try {
-            if (!window.jspdf || !window.jspdf.jsPDF) {
-                console.error("jsPDF library is not loaded. Cannot generate PDF.");
-                this.dataManager.displayNotification("Erro: Biblioteca jsPDF não carregada.", "error");
+            if (!window.jspdf?.jsPDF?.API?.autoTable) {
+                this.dataManager.displayNotification('Erro: jsPDF ou AutoTable não carregados.', 'error');
                 return;
             }
             const { jsPDF } = window.jspdf;
             const doc = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4' });
-
             const pageWidth = doc.internal.pageSize.getWidth();
-            const pageHeight = doc.internal.pageSize.getHeight();
-            const margin = 10;
-            const usableWidth = pageWidth - 2 * margin;
+            const margin = 15;
             let y = margin;
-            const lineSpacing = 5; 
-            const sectionSpacing = 8;
 
-            const addWrappedText = (text, x, currentY, options = {}) => {
-                const { fontSize = 10, fontStyle = 'normal', maxWidth = usableWidth, color = [0,0,0] } = options;
-                doc.setFontSize(fontSize);
-                doc.setFont(undefined, fontStyle);
-                doc.setTextColor(color[0], color[1], color[2]);
-
-                const lines = doc.splitTextToSize(text, maxWidth);
-                doc.text(lines, x, currentY);
-                return currentY + (lines.length * (fontSize * 0.352778 * 1.2)); 
-            };
-
-            /* [NOVO] cabeçalho com logo e info do paciente */
-            const logoImg = document.querySelector('img[src="ULSSMsgtf.jpg"]');
-            if (logoImg) {
-                const canvas = document.createElement('canvas');
-                canvas.width = logoImg.naturalWidth; canvas.height = logoImg.naturalHeight;
-                canvas.getContext('2d').drawImage(logoImg, 0, 0);
-                doc.addImage(canvas.toDataURL('image/jpeg'), 'JPEG', margin, y, 25, 15);
-            }
-            doc.setFontSize(14); doc.setFont(undefined, 'bold');
-            doc.text('Prescrição Nutrição Parentérica', pageWidth - margin, y + 5, { align: 'right' });
-            doc.setFontSize(10); doc.setFont(undefined, 'normal');
-            doc.text(`Paciente: ${patientName}`, pageWidth - margin, y + 11, { align: 'right' });
-            doc.text(`Data: ${new Date(prescriptionDate).toLocaleDateString()}`, pageWidth - margin, y + 16, { align: 'right' });
+            if (LOGO_DATA_URL) doc.addImage(LOGO_DATA_URL, 'JPEG', margin, y, 20, 20);
+            doc.setFontSize(12).setFont(undefined, 'bold');
+            doc.text('MAPA DE PREPARAÇÃO – NUTRIÇÃO PARENTÉRICA', pageWidth / 2, y + 10, { align: 'center' });
+            doc.setFontSize(10).setFont(undefined, 'normal');
+            doc.text(`Prep nº ${prepNumber}`, pageWidth - margin, y + 4, { align: 'right' });
+            doc.text(new Date(prescriptionDate).toLocaleDateString(), pageWidth - margin, y + 9, { align: 'right' });
+            doc.text(`HN: ${formulation.patient?.id || ''}`, pageWidth - margin, y + 14, { align: 'right' });
             y += 22;
 
-            doc.setFontSize(10); doc.setFont(undefined, 'normal');
-            doc.text(`Número Preparação: ${preparationNumber}`, margin, y);
-            let displayDate = 'N/A';
-            try { displayDate = prescriptionDate ? new Date(prescriptionDate).toLocaleDateString() : new Date().toLocaleDateString(); } catch {}
-            doc.text(`Data Prescrição: ${displayDate}`, pageWidth - margin, y, { align: 'right' });
-            y += lineSpacing * 1.5;
+            const tableData = this.buildCompositionTable(formulation);
+            doc.autoTable({
+                startY: y,
+                head: [['Componente', 'Qtd.', 'mL a adicionar']],
+                body: tableData,
+                theme: 'grid',
+                styles: { fontSize: 9 },
+                headStyles: { fillColor: [148,163,184] },
+                alternateRowStyles: { fillColor: [243,244,246] },
+                columnStyles: { 2: { fontStyle: 'bold', textColor: [30,64,175] } },
+                didDrawPage: data => {
+                    const ph = doc.internal.pageSize.getHeight();
+                    doc.setFontSize(8);
+                    doc.text('Elaborado por ________', margin, ph - 10);
+                    doc.text(`Página ${data.pageNumber} de ${doc.internal.getNumberOfPages()}`, pageWidth - margin, ph - 10, { align: 'right' });
+                }
+            });
 
-            doc.text(`Paciente: ${patientName || 'N/A'}`, margin, y);
-            doc.text(`Peso: ${formulation.patient?.weight ?? '?'} kg`, pageWidth - margin, y, { align: 'right' });
-            y += lineSpacing * 1.5;
-            doc.line(margin, y, pageWidth - margin, y); 
-            y += lineSpacing;
-
-
-            doc.setFontSize(12); doc.setFont(undefined, 'bold');
-            doc.text('Detalhes da Formulação:', margin, y);
-            y += lineSpacing;
-            const formulationDetailsText = this.formatCompositionDetailsForPDF(formulation);
-            y = addWrappedText(formulationDetailsText, margin, y, { fontSize: 9 });
-            y += sectionSpacing;
-
-            if (y > pageHeight - margin * 3) { doc.addPage(); y = margin; } 
-
-            doc.setFontSize(12); doc.setFont(undefined, 'bold');
-            doc.text('Mapa de Preparação (Ordem Sugerida):', margin, y);
-            y += lineSpacing;
-            y = addWrappedText(preparationMap, margin, y, { fontSize: 8.5, fontStyle: 'courier' }); 
-            y += sectionSpacing;
-
-            if (y > pageHeight - margin * 3) { doc.addPage(); y = margin; }
-
-            if (formulation.warnings?.length > 0) {
-                doc.setFontSize(12); doc.setFont(undefined, 'bold');
-                y = addWrappedText('Avisos da Formulação:', margin, y, { color: [255, 100, 0] }); 
-                y += lineSpacing * 0.5;
-                y = addWrappedText(formulation.warnings.map(w => `- ${w}`).join('\n'), margin, y, { fontSize: 9 });
-                y += sectionSpacing;
-                if (y > pageHeight - margin * 3) { doc.addPage(); y = margin; }
+            const limit = this.settings.osmolarityLimits[formulation.route] || 0;
+            let nextY = doc.lastAutoTable.finalY + 6;
+            if (formulation.osmolarity > limit) {
+                doc.setTextColor(220,38,38);
+                doc.text('⚠︎ Osmolaridade Alta', margin, nextY);
+                doc.setTextColor(0,0,0);
+                nextY += 6;
             }
 
-            if (formulation.errors?.length > 0) {
-                doc.setFontSize(12); doc.setFont(undefined, 'bold');
-                y = addWrappedText('ERROS CRÍTICOS:', margin, y, { color: [255, 0, 0] }); 
-                y += lineSpacing * 0.5;
-                y = addWrappedText(formulation.errors.map(e => `- ${e}`).join('\n'), margin, y, { fontSize: 9 });
-                y += sectionSpacing;
-                if (y > pageHeight - margin * 3) { doc.addPage(); y = margin; }
-            }
+            doc.text(preparationMap, margin, nextY);
 
-            y = Math.max(y, pageHeight - margin - 30); 
-            if (y > pageHeight - margin - 30) { 
-                 if (pageHeight - y < 30) { 
-                    doc.addPage(); y = margin;
-                 }
-            } else {
-                y = pageHeight - margin - 30; 
-            }
-
-            doc.setFontSize(10);
-            doc.text('Prescrito por: _________________________', margin, y);
-            doc.text('Conferido por (Farm.): _________________________', pageWidth / 2, y, {align: 'left'});
-            y += lineSpacing * 2;
-            doc.text(`Data Impressão: ${new Date().toLocaleString()}`, margin, y);
-
-            const filename = `Prescricao_NP_${String(preparationNumber).replace(/\W/g, '')}_${patientName.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}.pdf`;
-            doc.save(filename);
-            console.log("PDF generated:", filename);
-        } catch (error) {
-            console.error("NutriSoft.exportPDF: Erro ao gerar PDF:", error);
-            this.dataManager.displayNotification(`Erro ao gerar PDF: ${error.message}. Verifique o console.`, 'error');
-            AuditLogger.log('exportPDFError', { prepId: preparationNumber, error: error.message, stack: error.stack });
+            doc.save(`prep_${prepNumber}.pdf`);
+            AuditLogger.log('pdfGenerated', { prepNum: prepNumber, user: this.dataManager.getUserName() });
+        } catch (e) {
+            console.error('exportPDF error', e);
+            this.dataManager.displayNotification(`Erro ao gerar PDF: ${e.message}`, 'error');
         }
     }
-    formatCompositionDetailsForPDF(formulation) { 
+    formatCompositionDetailsForPDF(formulation) {
         const details = [];
         const formatLine = (label, component, valueKey = 'volume', unit = 'ml', dp = 2) => {
              if (!component || component[valueKey] === undefined || component[valueKey] === null || (component[valueKey] === 0 && (label.toLowerCase().includes('volume') || unit ==='ml'))) return null; 
@@ -2896,6 +2860,44 @@ class NutriSoft {
         details.push(formatLine('Água Estéril Adicionada', formulation.water, 'volume', 'ml'));
 
         return details.filter(line => line !== null).join('\n');
+    }
+
+    // [NEW] build tabular data for jsPDF AutoTable
+    buildCompositionTable(formulation) {
+        const rows = [];
+        const pushRow = (label, comp, valueKey = 'volume', unit = 'ml') => {
+            if (!comp) return;
+            const val = comp[valueKey];
+            if (val === undefined || val === null) return;
+            const vol = comp.volume !== undefined ? comp.volume : null;
+            if (val === 0 && (valueKey === 'volume' || unit === 'ml')) return;
+            rows.push([
+                label,
+                valueKey !== 'volume' ? this.formatValue(val, unit, unit === 'ml' ? 0 : 2) : '',
+                vol !== null ? this.formatValue(vol, 'ml', 0) : ''
+            ]);
+        };
+        pushRow('Aminoácidos', formulation.proteins, 'required', 'g');
+        if (formulation.glutamine?.volume > 0) {
+            pushRow('Glutamina', formulation.glutamine, 'required_g_dipeptide', 'g');
+        }
+        pushRow('Glucose', formulation.glucose, 'required', 'g');
+        pushRow('Lípidos', formulation.lipids, 'required', 'g');
+        Object.entries(formulation.electrolytes || {}).forEach(([key, comp]) => {
+            const name = key.charAt(0).toUpperCase() + key.slice(1);
+            const unit = key === 'phosphorus' ? 'mmol' : 'mEq';
+            pushRow(name, comp, 'required', unit);
+        });
+        Object.entries(formulation.additives || {}).forEach(([key, comp]) => {
+            let label = key.charAt(0).toUpperCase() + key.slice(1).replace(/_/g,' ');
+            let unit = 'ml';
+            let valKey = 'volume';
+            if (key === 'insulin' || key === 'heparin') { unit = 'UI'; valKey = 'required'; }
+            else if (key === 'carnitine') { unit = 'mg'; valKey = 'required'; }
+            pushRow(label, comp, valKey, unit);
+        });
+        pushRow('Água Estéril', formulation.water, 'volume', 'ml');
+        return rows;
     }
     addLabelContent(doc, formulation, startX, startY, isLipidsLabel, preparationNumber, patientName, prescriptionDate) { 
         const labelWidth = 90; const labelHeight = 50; const padding = 5;
@@ -3256,6 +3258,7 @@ let app;
 document.addEventListener('DOMContentLoaded', () => {
     console.log("DOM fully loaded and parsed.");
     initTheme(); /* [NOVO] */
+    preloadLogo(); // [NEW]
     try {
         app = new NutriSoft();
         app.init();
