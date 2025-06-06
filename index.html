@@ -8,6 +8,8 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- jsPDF library for PDF generation -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" defer></script>
+    <!-- [NEW] jsPDF AutoTable plugin -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.25/jspdf.plugin.autotable.min.js" defer></script>
     <!-- Chart.js library for charts -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js" defer></script>
     <!-- Font Awesome for icons -->
@@ -48,7 +50,7 @@
                 <!-- Logo and Application Title -->
                 <div class="flex items-center">
                     <!-- Consider adding alt text or removing if purely decorative -->
-                    <img src="ULSSMsgtf.jpg" alt="Logo ULSSM" class="h-12 mr-4">
+                    <img id="logo-img" src="ULSSMsgtf.jpg" alt="Logo ULSSM" class="h-12 mr-4" crossorigin="anonymous">
                     <div>
                         <h1 class="text-2xl font-bold">NutriSoft</h1>
                         <p class="text-sm text-gray-200">Serviço de Gestão Técnico-Farmacêutica - ULSSM</p>
@@ -62,8 +64,12 @@
                     <button id="prescription-nav-btn" class="nav-btn" title="Criar ou Ver Prescrições"> <i class="fas fa-prescription mr-1"></i>Prescrições </button>
                     <button id="reports-nav-btn" class="nav-btn" title="Ver Relatórios de Prescrições"> <i class="fas fa-chart-bar mr-1"></i>Relatórios </button>
                     <button id="evolution-nav-btn" class="nav-btn" title="Ver Evolução do Doente"> <i class="fas fa-chart-line mr-1"></i>Evolução </button>
+                    <!-- [NOVO] separador Componentes -->
+                    <button id="components-nav-btn" class="nav-btn" title="Gerir Componentes"> <i class="fas fa-pills mr-1"></i>Componentes </button>
                     <button id="solutions-nav-btn" class="nav-btn hidden" title="Gerir Soluções (Admin)"> <i class="fas fa-flask mr-1"></i>Soluções </button> <!-- Hidden by default, shown by JS based on permissions -->
                     <button id="settings-nav-btn" class="nav-btn hidden" title="Configurações (Admin)"> <i class="fas fa-cog mr-1"></i>Configurações </button> <!-- Hidden by default, shown by JS -->
+                    <!-- [NOVO] Tema claro/escuro -->
+                    <button id="theme-toggle-btn" class="nav-btn" title="Alternar tema"><i class="fas fa-moon mr-1"></i>Tema</button>
                     <!-- Options Dropdown for Data Management -->
                     <div class="relative inline-block text-left">
                         <button id="options-menu-button" type="button" class="nav-btn inline-flex items-center" aria-haspopup="true" aria-expanded="false" title="Opções de Importação/Exportação de Dados">
@@ -111,38 +117,41 @@
                         <input type="hidden" id="patient-id"> <!-- Hidden field for editing -->
                         <div class="form-group">
                             <label for="patient-id-number" class="block text-sm font-medium text-gray-700">Nº Identificação</label>
-                            <input type="text" id="patient-id-number" placeholder="Número SNS ou processo" title="Número de identificação do paciente (opcional)" class="input-field mt-1">
+                            <input type="text" id="patient-id-number" placeholder="Número SNS ou processo" title="Número de identificação do doente (opcional)" class="input-field mt-1">
                             <p id="patient-id-number-error" class="error-message hidden text-sm" aria-live="polite"></p> <!-- Error placeholder -->
                         </div>
                         <div class="form-group">
                             <label for="patient-name" class="block text-sm font-medium text-gray-700">Nome Completo <span class="text-red-500">*</span></label>
-                            <input type="text" id="patient-name" placeholder="Nome completo" title="Nome completo do paciente (obrigatório)" class="input-field mt-1" required>
+                            <input type="text" id="patient-name" list="patients-datalist" placeholder="Nome completo" title="Nome completo do doente (obrigatório)" class="input-field mt-1" required>
+                            <!-- [NOVO] datalist para autocomplete -->
+                            <datalist id="patients-datalist"></datalist>
                             <p id="patient-name-error" class="error-message hidden text-sm" aria-live="polite"></p>
                         </div>
                         <div class="form-group">
                             <label for="patient-service" class="block text-sm font-medium text-gray-700">Serviço Hospitalar</label>
-                            <input type="text" id="patient-service" placeholder="Ex: Medicina Interna" title="Serviço hospitalar do paciente (opcional)" class="input-field mt-1">
+                            <input type="text" id="patient-service" placeholder="Ex: Medicina Interna" title="Serviço hospitalar do doente (opcional)" class="input-field mt-1">
                             <p id="patient-service-error" class="error-message hidden text-sm" aria-live="polite"></p>
                         </div>
                         <div class="form-group">
                             <label for="patient-dob" class="block text-sm font-medium text-gray-700">Data de Nascimento</label>
-                            <input type="date" id="patient-dob" title="Data de nascimento do paciente (opcional)" class="input-field mt-1">
+                            <input type="date" id="patient-dob" title="Data de nascimento do doente (opcional)" class="input-field mt-1">
                             <p id="patient-dob-error" class="error-message hidden text-sm" aria-live="polite"></p>
                             <p id="patient-age-display" class="mt-1 text-gray-600 text-sm"></p> <!-- Calculated age display -->
                         </div>
                         <div class="form-group">
                             <label for="patient-weight" class="block text-sm font-medium text-gray-700">Peso (kg) <span class="text-red-500">*</span></label>
-                            <input type="number" id="patient-weight" placeholder="Ex: 70.5" step="0.1" min="0.1" title="Peso do paciente em quilogramas (obrigatório, > 0)" class="input-field mt-1" required>
+                            <input type="number" id="patient-weight" placeholder="Ex: 70.5" step="0.1" min="0.1" title="Peso do doente em quilogramas (obrigatório, > 0)" class="input-field mt-1" required>
                             <p id="patient-weight-error" class="error-message hidden text-sm" aria-live="polite"></p>
                         </div>
                         <div class="form-group">
                             <label for="patient-height" class="block text-sm font-medium text-gray-700">Altura (cm) <span class="text-red-500">*</span></label>
-                            <input type="number" id="patient-height" placeholder="Ex: 175" step="1" min="1" title="Altura do paciente em centímetros (obrigatório, > 0)" class="input-field mt-1" required>
+                            <input type="number" id="patient-height" placeholder="Ex: 175" step="1" min="1" title="Altura do doente em centímetros (obrigatório, > 0)" class="input-field mt-1" required>
                             <p id="patient-height-error" class="error-message hidden text-sm" aria-live="polite"></p>
+                            <p id="patient-bmi-display" class="mt-1 text-gray-600 text-sm"></p>
                         </div>
                         <div class="form-group">
                             <label for="patient-condition" class="block text-sm font-medium text-gray-700">Condição Clínica <span class="text-red-500">*</span></label>
-                            <select id="patient-condition" title="Condição clínica principal do paciente (obrigatório)" class="input-field mt-1" required>
+                            <select id="patient-condition" title="Condição clínica principal do doente (obrigatório)" class="input-field mt-1" required>
                                 <option value="">Selecione a Condição...</option>
                                 <option value="stable">Estável</option>
                                 <option value="critical">Crítico</option>
@@ -156,7 +165,7 @@
                         </div>
 
                         <div class="flex justify-start gap-2 mt-6">
-                            <button type="button" id="add-patient-btn" class="btn-primary"> <i class="fas fa-save mr-2"></i>Salvar </button>
+                            <button type="button" id="add-patient-btn" class="btn-primary"> <i class="fas fa-save mr-2"></i>Guardar </button>
                             <button type="button" id="clear-patient-form-btn" class="btn-secondary"> <i class="fas fa-times mr-2"></i> Limpar </button>
                         </div>
                         <p class="text-gray-500 text-sm mt-2"><span class="text-red-500">*</span> Campos obrigatórios</p>
@@ -190,6 +199,66 @@
             </div>
         </section>
 
+        <!-- [NOVO] Components Section -->
+        <section id="components-section" class="section hidden bg-white rounded-lg shadow-md p-6 mb-8">
+            <h2 class="text-2xl font-semibold mb-4 flex items-center"><i class="fas fa-pills mr-2"></i>Componentes</h2>
+            <form id="component-form" class="space-y-4" novalidate>
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    <div class="form-group">
+                        <label for="component-name" class="block text-sm font-medium text-gray-700">Nome <span class="text-red-500">*</span></label>
+                        <input type="text" id="component-name" class="input-field mt-1" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="component-type" class="block text-sm font-medium text-gray-700">Tipo <span class="text-red-500">*</span></label>
+                        <select id="component-type" class="input-field mt-1" required>
+                            <option value="electrolyte">Electrólito</option>
+                            <option value="trace">Oligoelemento</option>
+                            <option value="vitamin">Vitamina</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="component-unit" class="block text-sm font-medium text-gray-700">Unidade <span class="text-red-500">*</span></label>
+                        <select id="component-unit" class="input-field mt-1" required>
+                            <option value="mEq">mEq</option>
+                            <option value="mmol">mmol</option>
+                            <option value="UI">UI</option>
+                            <option value="g">g</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="component-concentration" class="block text-sm font-medium text-gray-700">Concentração</label>
+                        <input type="number" id="component-concentration" class="input-field mt-1" min="0" step="0.01">
+                    </div>
+                    <div class="form-group">
+                        <label for="component-osmolarity" class="block text-sm font-medium text-gray-700">Osmolaridade</label>
+                        <input type="number" id="component-osmolarity" class="input-field mt-1" min="0" step="0.1">
+                    </div>
+                </div>
+                <div class="flex gap-2">
+                    <button type="button" id="add-component-btn" class="btn-primary"><i class="fas fa-save mr-2"></i>Guardar</button>
+                    <button type="button" id="clear-component-form-btn" class="btn-secondary"><i class="fas fa-times mr-2"></i>Limpar</button>
+                </div>
+            </form>
+
+            <div class="overflow-x-auto border rounded-lg mt-6">
+                <table class="w-full min-w-[600px]" id="components-table">
+                    <thead class="bg-gray-50">
+                        <tr>
+                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Nome</th>
+                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Tipo</th>
+                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Unidade</th>
+                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Concentração</th>
+                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Osmolaridade</th>
+                            <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Ações</th>
+                        </tr>
+                    </thead>
+                    <tbody id="components-list" class="bg-white divide-y divide-gray-200">
+                        <tr class="no-results-row hidden"><td colspan="6">Nenhum componente registado.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
         <!-- Prescription Section -->
         <section id="prescription-section" class="section hidden bg-white rounded-lg shadow-md p-6 mb-8">
             <h2 class="text-2xl font-semibold mb-6 flex items-center"><i class="fas fa-prescription mr-2"></i>Prescrição de Nutrição Parentérica</h2>
@@ -201,7 +270,7 @@
                     <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
                         <div class="form-group">
                             <label for="prescription-patient" class="block text-sm font-medium text-gray-700">Selecionar Doente <span class="text-red-500">*</span></label>
-                            <select id="prescription-patient" title="Selecione o paciente para a prescrição (obrigatório)" class="input-field mt-1 w-full" required> </select>
+                            <select id="prescription-patient" title="Selecione o doente para a prescrição (obrigatório)" class="input-field mt-1 w-full" required> </select>
                             <p id="prescription-patient-error" class="error-message hidden text-sm" aria-live="polite"></p>
                         </div>
                         <div class="form-group">
@@ -218,6 +287,22 @@
                              <p id="administration-route-error" class="error-message hidden text-sm" aria-live="polite"></p>
                         </div>
                     </div>
+                </fieldset>
+
+                <!-- Caloric Needs Group -->
+                <fieldset class="mb-6 p-4 bg-gray-50 rounded-md border border-gray-200">
+                    <legend class="text-lg font-semibold mb-3 text-gray-800 px-2">Necessidades Calóricas</legend>
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div class="form-group">
+                            <label for="caloric-needs" class="block text-sm font-medium text-gray-700">Necessidades Calóricas (kcal/kg/dia) <span class="text-red-500">*</span></label>
+                            <input type="number" id="caloric-needs" class="input-field mt-1 w-full" placeholder="Ex: 25" step="1" min="10" value="25" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="caloric-needs-total" class="block text-sm font-medium text-gray-700">Total Calorias (kcal/dia)</label>
+                            <input type="number" id="caloric-needs-total" class="input-field mt-1 w-full bg-gray-100" readonly>
+                        </div>
+                    </div>
+                    <p class="text-xs text-gray-500 mb-4" id="macro-suggestion"></p>
                 </fieldset>
 
                 <!-- Nutritional Needs Group -->
@@ -392,7 +477,7 @@
 
                 <!-- Save/Print Buttons for Results -->
                 <div class="flex justify-start gap-4 mt-4">
-                    <button type="button" id="save-prescription-btn" class="btn-primary" disabled> <i class="fas fa-save mr-2"></i> Salvar Prescrição </button>
+                    <button type="button" id="save-prescription-btn" class="btn-primary" disabled> <i class="fas fa-save mr-2"></i> Guardar Prescrição </button>
                     <button type="button" id="print-prescription-btn" class="btn-secondary" disabled> <i class="fas fa-print mr-2"></i> Imprimir Prescrição </button>
                 </div>
             </div>
@@ -578,7 +663,7 @@
                  </fieldset>
 
                  <div class="flex justify-start gap-2 mt-6">
-                     <button type="button" id="save-settings-btn" class="btn-primary"> <i class="fas fa-save mr-2"></i>Salvar Configurações </button>
+                     <button type="button" id="save-settings-btn" class="btn-primary"> <i class="fas fa-save mr-2"></i>Guardar Configurações </button>
                  </div>
             </form>
 
@@ -738,7 +823,7 @@
                     </div>
                     <!-- Modal Actions -->
                     <div class="bg-gray-50 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse">
-                        <button id="save-solution-btn" type="button" class="btn-primary w-full sm:ml-3 sm:w-auto"> <i class="fas fa-save mr-2"></i>Salvar </button>
+                        <button id="save-solution-btn" type="button" class="btn-primary w-full sm:ml-3 sm:w-auto"> <i class="fas fa-save mr-2"></i>Guardar </button>
                         <button id="cancel-solution-btn" type="button" class="btn-secondary w-full mt-3 sm:mt-0 sm:w-auto"> <i class="fas fa-times mr-2"></i>Cancelar </button>
                     </div>
                 </form>
