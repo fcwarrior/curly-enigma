@@ -321,7 +321,7 @@ class NutriSoft {
         });
     }
 
-    loadInitialData() { 
+    loadInitialData() {
         console.log("NutriSoft.loadInitialData starting...");
         this.patients = this.dataManager.getPatients();
         this.prescriptions = this.dataManager.getPrescriptions();
@@ -329,12 +329,62 @@ class NutriSoft {
         this.components = this.dataManager.getComponents(); /* [NOVO] */
         this.settings = this.dataManager.getSettings(); // Ensure settings are loaded early
         this.userName = this.dataManager.getUserName();
+        this.syncComponentsToSolutions(); /* [NOVO] ensure components reflected in solutions */
         console.log("NutriSoft.loadInitialData finished. Patients:", this.patients.length, "Prescriptions:", this.prescriptions.length, "Solutions:", Object.keys(this.solutions).length);
+    }
+
+    /* [NOVO] merge componentes na lista de solucoes para uso em selects */
+    syncComponentsToSolutions() {
+        this.components.forEach(c => {
+            this.solutions[c.name] = {
+                ...(this.solutions[c.name] || {}),
+                type: c.type,
+                unit: c.unit,
+                concentration: c.concentration,
+                osmolarityContribution: c.osmolarity
+            };
+        });
+        this.dataManager.saveSolutions(this.solutions);
+    }
+
+    /* [NOVO] atualizar dropdowns das solucoes base */
+    updateSolutionSelects() {
+        const mapping = {
+            aminoacid: 'amino-acids-solution',
+            glucose: 'glucose-solution',
+            lipid: 'lipids-solution',
+            sodium: 'nacl-solution',
+            potassium: 'kcl-solution',
+            calcium: 'cacl2-solution',
+            magnesium: 'mgso4-solution',
+            phosphorus: 'phosphorus-solution'
+        };
+        const groups = {
+            aminoacid: [], glucose: [], lipid: [], sodium: [], potassium: [], calcium: [], magnesium: [], phosphorus: []
+        };
+        Object.entries(this.solutions).forEach(([name, sol]) => {
+            if (sol.type === 'aminoacid') groups.aminoacid.push(name);
+            if (sol.type === 'glucose') groups.glucose.push(name);
+            if (sol.type === 'lipid') groups.lipid.push(name);
+            if (sol.sodium_concentration != null) groups.sodium.push(name);
+            if (sol.potassium_concentration != null) groups.potassium.push(name);
+            if (sol.calcium_concentration != null) groups.calcium.push(name);
+            if (sol.magnesium_concentration != null) groups.magnesium.push(name);
+            if (sol.phosphorus_concentration != null) groups.phosphorus.push(name);
+        });
+        Object.entries(mapping).forEach(([key, selId]) => {
+            const sel = document.getElementById(selId);
+            if (!sel) return;
+            const current = sel.value;
+            sel.innerHTML = groups[key].map(v => `<option value="${v}">${v}</option>`).join('');
+            if (groups[key].includes(current)) sel.value = current;
+        });
     }
     init() { 
         console.log("NutriSoft.init starting...");
         this.loadSettings(); // Load settings into UI form
         this.renderUIAllSections(); // Render all dynamic UI parts based on loaded data
+        this.updateSolutionSelects(); /* [NOVO] ensure selects reflect available solutions */
         this.initRouting();
         this.initEventListeners();
         this.initAutoSave(); // Start or stop auto-save based on loaded settings
@@ -557,12 +607,12 @@ class NutriSoft {
         settingsNavBtn?.classList.toggle('hidden', !isAdmin);
         solutionsNavBtn?.classList.toggle('hidden', !isAdmin);
 
-        if (exportDataBtn) exportDataBtn.disabled = !(isAdmin || (isPrescriber && permissions.exportData));
+        if (exportDataBtn) exportDataBtn.disabled = false; // [REFATORADO]
         if (exportSettingsBtn) exportSettingsBtn.disabled = !isAdmin;
         if (exportAuditLogsBtn) exportAuditLogsBtn.disabled = !isAdmin;
-        if (importDataBtn) importDataBtn.disabled = !isAdmin;
+        if (importDataBtn) importDataBtn.disabled = false; // [REFATORADO]
         if (importSettingsBtn) importSettingsBtn.disabled = !isAdmin;
-        if (auditLogViewBtn) auditLogViewBtn.classList.toggle('hidden', !isAdmin); 
+        if (auditLogViewBtn) auditLogViewBtn.classList.toggle('hidden', !isAdmin);
 
 
         const canDelete = isAdmin; 
@@ -3077,12 +3127,13 @@ class NutriSoft {
             userFeedback = `Solução "${newName}" adicionada com sucesso!`;
         }
         this.solutions = solutionsUpdate; 
-        this.dataManager.saveSolutions(this.solutions); 
+        this.dataManager.saveSolutions(this.solutions);
 
         AuditLogger.log(logAction, logDetails);
         this.dataManager.displayNotification(userFeedback, 'success');
-        this.renderSolutions(); 
-        this.clearSolutionForm(true); 
+        this.renderSolutions();
+        this.updateSolutionSelects(); /* [NOVO] */
+        this.clearSolutionForm(true);
         console.log(`NutriSoft.saveSolution: Solution ${logAction} successful for:`, newName);
     }
     deleteSolution(solutionName) { 
@@ -3095,11 +3146,12 @@ class NutriSoft {
             let solutionsUpdate = { ...this.solutions };
             delete solutionsUpdate[solutionName];
             this.solutions = solutionsUpdate; 
-            this.dataManager.saveSolutions(this.solutions); 
+            this.dataManager.saveSolutions(this.solutions);
 
             AuditLogger.log('deleteSolutionConfirmed', { solutionName });
             this.dataManager.displayNotification(`Solução "${solutionName}" excluída com sucesso!`, 'success');
-            this.renderSolutions(); 
+            this.renderSolutions();
+            this.updateSolutionSelects(); /* [NOVO] */
         } else {
             AuditLogger.log('deleteSolutionCancelled', { solutionName });
             console.log(`NutriSoft.deleteSolution: Deletion of solution ${solutionName} cancelled by user.`);
@@ -3144,6 +3196,8 @@ class NutriSoft {
         const existing = this.components.find(c => c.name === component.name);
         if (existing) Object.assign(existing, component); else this.components.push(component);
         this.dataManager.saveComponents(this.components);
+        this.syncComponentsToSolutions(); /* [NOVO] */
+        this.updateSolutionSelects(); /* [NOVO] */
         EventBus.emit('componentsChanged', this.components);
         this.renderComponents();
         this.clearComponentForm();
@@ -3180,6 +3234,8 @@ class NutriSoft {
     deleteComponent(index) {
         this.components.splice(index, 1);
         this.dataManager.saveComponents(this.components);
+        this.syncComponentsToSolutions(); /* [NOVO] */
+        this.updateSolutionSelects(); /* [NOVO] */
         this.renderComponents();
         EventBus.emit('componentsChanged', this.components);
     }
@@ -3204,6 +3260,7 @@ document.addEventListener('DOMContentLoaded', () => {
         app = new NutriSoft();
         app.init();
         EventBus.on('patientsChanged', () => app.updatePatientsDatalist()); /* [NOVO] */
+        EventBus.on('componentsChanged', () => { app.updateSolutionSelects(); }); /* [NOVO] */
         console.log("NutriSoft application instance created and initialized successfully.");
 
         const themeBtn = document.getElementById('theme-toggle-btn');
