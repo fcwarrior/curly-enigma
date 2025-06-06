@@ -62,8 +62,12 @@
                     <button id="prescription-nav-btn" class="nav-btn" title="Criar ou Ver Prescrições"> <i class="fas fa-prescription mr-1"></i>Prescrições </button>
                     <button id="reports-nav-btn" class="nav-btn" title="Ver Relatórios de Prescrições"> <i class="fas fa-chart-bar mr-1"></i>Relatórios </button>
                     <button id="evolution-nav-btn" class="nav-btn" title="Ver Evolução do Doente"> <i class="fas fa-chart-line mr-1"></i>Evolução </button>
+                    <!-- [NOVO] separador Componentes -->
+                    <button id="components-nav-btn" class="nav-btn" title="Gerir Componentes"> <i class="fas fa-pills mr-1"></i>Componentes </button>
                     <button id="solutions-nav-btn" class="nav-btn hidden" title="Gerir Soluções (Admin)"> <i class="fas fa-flask mr-1"></i>Soluções </button> <!-- Hidden by default, shown by JS based on permissions -->
                     <button id="settings-nav-btn" class="nav-btn hidden" title="Configurações (Admin)"> <i class="fas fa-cog mr-1"></i>Configurações </button> <!-- Hidden by default, shown by JS -->
+                    <!-- [NOVO] Tema claro/escuro -->
+                    <button id="theme-toggle-btn" class="nav-btn" title="Alternar tema"><i class="fas fa-moon mr-1"></i>Tema</button>
                     <!-- Options Dropdown for Data Management -->
                     <div class="relative inline-block text-left">
                         <button id="options-menu-button" type="button" class="nav-btn inline-flex items-center" aria-haspopup="true" aria-expanded="false" title="Opções de Importação/Exportação de Dados">
@@ -116,7 +120,9 @@
                         </div>
                         <div class="form-group">
                             <label for="patient-name" class="block text-sm font-medium text-gray-700">Nome Completo <span class="text-red-500">*</span></label>
-                            <input type="text" id="patient-name" placeholder="Nome completo" title="Nome completo do paciente (obrigatório)" class="input-field mt-1" required>
+                            <input type="text" id="patient-name" list="patients-datalist" placeholder="Nome completo" title="Nome completo do paciente (obrigatório)" class="input-field mt-1" required>
+                            <!-- [NOVO] datalist para autocomplete -->
+                            <datalist id="patients-datalist"></datalist>
                             <p id="patient-name-error" class="error-message hidden text-sm" aria-live="polite"></p>
                         </div>
                         <div class="form-group">
@@ -188,6 +194,66 @@
                         </table>
                     </div>
                 </div>
+            </div>
+        </section>
+
+        <!-- [NOVO] Components Section -->
+        <section id="components-section" class="section hidden bg-white rounded-lg shadow-md p-6 mb-8">
+            <h2 class="text-2xl font-semibold mb-4 flex items-center"><i class="fas fa-pills mr-2"></i>Componentes</h2>
+            <form id="component-form" class="space-y-4" novalidate>
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    <div class="form-group">
+                        <label for="component-name" class="block text-sm font-medium text-gray-700">Nome <span class="text-red-500">*</span></label>
+                        <input type="text" id="component-name" class="input-field mt-1" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="component-type" class="block text-sm font-medium text-gray-700">Tipo <span class="text-red-500">*</span></label>
+                        <select id="component-type" class="input-field mt-1" required>
+                            <option value="electrolyte">Electrólito</option>
+                            <option value="trace">Oligoelemento</option>
+                            <option value="vitamin">Vitamina</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="component-unit" class="block text-sm font-medium text-gray-700">Unidade <span class="text-red-500">*</span></label>
+                        <select id="component-unit" class="input-field mt-1" required>
+                            <option value="mEq">mEq</option>
+                            <option value="mmol">mmol</option>
+                            <option value="UI">UI</option>
+                            <option value="g">g</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="component-concentration" class="block text-sm font-medium text-gray-700">Concentração</label>
+                        <input type="number" id="component-concentration" class="input-field mt-1" min="0" step="0.01">
+                    </div>
+                    <div class="form-group">
+                        <label for="component-osmolarity" class="block text-sm font-medium text-gray-700">Osmolaridade</label>
+                        <input type="number" id="component-osmolarity" class="input-field mt-1" min="0" step="0.1">
+                    </div>
+                </div>
+                <div class="flex gap-2">
+                    <button type="button" id="add-component-btn" class="btn-primary"><i class="fas fa-save mr-2"></i>Guardar</button>
+                    <button type="button" id="clear-component-form-btn" class="btn-secondary"><i class="fas fa-times mr-2"></i>Limpar</button>
+                </div>
+            </form>
+
+            <div class="overflow-x-auto border rounded-lg mt-6">
+                <table class="w-full min-w-[600px]" id="components-table">
+                    <thead class="bg-gray-50">
+                        <tr>
+                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Nome</th>
+                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Tipo</th>
+                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Unidade</th>
+                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Concentração</th>
+                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Osmolaridade</th>
+                            <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Ações</th>
+                        </tr>
+                    </thead>
+                    <tbody id="components-list" class="bg-white divide-y divide-gray-200">
+                        <tr class="no-results-row hidden"><td colspan="6">Nenhum componente registado.</td></tr>
+                    </tbody>
+                </table>
             </div>
         </section>
 

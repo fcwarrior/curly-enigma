@@ -5,6 +5,27 @@
  */
 const APP_VERSION = '1.0.0';
 
+/* [NOVO] Simple event bus */
+const EventBus = {
+    events: {},
+    on(event, handler) {
+        (this.events[event] = this.events[event] || []).push(handler);
+    },
+    emit(event, payload) {
+        (this.events[event] || []).forEach(fn => fn(payload));
+    }
+};
+
+/* [NOVO] tema claro/escuro */
+function initTheme() {
+    const pref = localStorage.getItem('theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    document.documentElement.classList.toggle('dark', pref === 'dark');
+}
+function toggleTheme() {
+    const isDark = document.documentElement.classList.toggle('dark');
+    localStorage.setItem('theme', isDark ? 'dark' : 'light');
+}
+
 /**
  * Manages data persistence using localStorage.
  * Handles getting, saving, exporting, and importing application data.
@@ -14,6 +35,7 @@ class DataManager {
         this.patientsKey = 'patients';
         this.prescriptionsKey = 'prescriptions';
         this.solutionsKey = 'solutions';
+        this.componentsKey = 'components'; /* [NOVO] */
         this.preparationCounterKey = 'preparationCounter';
         this.settingsKey = 'settings';
         this.userNameKey = 'userName';
@@ -75,6 +97,7 @@ class DataManager {
             patients: this.getPatients(),
             prescriptions: this.getPrescriptions(),
             solutions: this.getSolutions(),
+            components: this.getComponents(), /* [NOVO] */
             settings: this.getSettings(),
             userName: this.getUserName(),
             auditLogs: this.getAuditLogs()
@@ -112,6 +135,15 @@ class DataManager {
 
     saveSolutions(solutions) {
         this.saveData(this.solutionsKey, solutions);
+    }
+
+    /* [NOVO] */
+    getComponents() {
+        return this.getData(this.componentsKey) || [];
+    }
+
+    saveComponents(components) {
+        this.saveData(this.componentsKey, components);
     }
 
     getSettings() {
@@ -211,6 +243,7 @@ class DataManager {
                 if (jsonData.patients && Array.isArray(jsonData.patients)) { this.savePatients(jsonData.patients); importedSomething = true; }
                 if (jsonData.prescriptions && Array.isArray(jsonData.prescriptions)) { this.savePrescriptions(jsonData.prescriptions); importedSomething = true; }
                 if (jsonData.solutions && typeof jsonData.solutions === 'object') { this.saveSolutions(jsonData.solutions); importedSomething = true; }
+                if (jsonData.components && Array.isArray(jsonData.components)) { this.saveComponents(jsonData.components); importedSomething = true; } /* [NOVO] */
                 if (jsonData.settings && typeof jsonData.settings === 'object') { this.saveSettings(jsonData.settings); importedSomething = true; }
                 if (jsonData.userName && typeof jsonData.userName === 'string') { this.saveUserName(jsonData.userName); importedSomething = true; }
                 if (jsonData.auditLogs && Array.isArray(jsonData.auditLogs)) { this.saveAuditLogs(jsonData.auditLogs); importedSomething = true; }
@@ -263,7 +296,7 @@ class NutriSoft {
         console.log("NutriSoft constructor starting...");
         this.dataManager = new DataManager();
         this.patients = []; this.prescriptions = []; this.solutions = {}; this.settings = {}; this.userName = '';
-        this.currentPrescriptionIndex = null; this.autoSaveInterval = null; this.evolutionChartInstance = null; this.components = {};
+        this.currentPrescriptionIndex = null; this.autoSaveInterval = null; this.evolutionChartInstance = null; this.components = [];
         this.loadInitialData();
         this.applySettings();
         if (Object.keys(this.solutions).length === 0) { console.log("Initializing default solutions..."); this.initSolutions(); }
@@ -276,7 +309,8 @@ class NutriSoft {
             'handleRouteChange', 'handleDataImport', 'handleSettingsImport', 'handlePrescriptionAction',
             'handleReportsAction', 'handleSolutionsAction', 'saveSettings', 'addPatient',
             'clearPatientForm', 'calculateFormulation', 'savePrescription', 'printPrescription',
-            'saveSolution', 'clearSolutionForm', 'handlePatientListAction'
+            'saveSolution', 'clearSolutionForm', 'handlePatientListAction',
+            'addComponent', 'clearComponentForm', 'handleComponentListAction', 'renderComponents'
         ];
         methodsToBind.forEach(method => {
             if (typeof this[method] === 'function') {
@@ -292,6 +326,7 @@ class NutriSoft {
         this.patients = this.dataManager.getPatients();
         this.prescriptions = this.dataManager.getPrescriptions();
         this.solutions = this.dataManager.getSolutions();
+        this.components = this.dataManager.getComponents(); /* [NOVO] */
         this.settings = this.dataManager.getSettings(); // Ensure settings are loaded early
         this.userName = this.dataManager.getUserName();
         console.log("NutriSoft.loadInitialData finished. Patients:", this.patients.length, "Prescriptions:", this.prescriptions.length, "Solutions:", Object.keys(this.solutions).length);
@@ -314,13 +349,25 @@ class NutriSoft {
         this.setupPrescriptionSearch();
         this.setupReportsSearch();
     }
-    updateUserNameDisplay() { 
+    updateUserNameDisplay() {
         const userNameInput = document.getElementById('user-name');
         if (userNameInput) {
             userNameInput.value = this.userName;
         } else {
             console.warn("updateUserNameDisplay: user-name input field not found.");
         }
+    }
+
+    /* [NOVO] preencher datalist de nomes */
+    updatePatientsDatalist() {
+        const list = document.getElementById('patients-datalist');
+        if (!list) return;
+        list.innerHTML = '';
+        this.patients.forEach(p => {
+            const opt = document.createElement('option');
+            opt.value = p.name;
+            list.appendChild(opt);
+        });
     }
     initSolutions() { 
         // Added osmolarity contribution values (estimates, should be verified)
@@ -396,7 +443,8 @@ class NutriSoft {
                     break;
                 case 'evolution': this.renderEvolutionPatientSelect(); break;
                 case 'solutions': this.renderSolutions(); break;
-                case 'settings': this.renderAuditLogs(); break; 
+                case 'components': this.renderComponents(); break; /* [NOVO] */
+                case 'settings': this.renderAuditLogs(); break;
                 case 'patients':
                      this.renderPatientsList();
                      this.renderPatients(); 
@@ -582,6 +630,9 @@ class NutriSoft {
         document.getElementById('prescription-history-table')?.addEventListener('click', this.handlePrescriptionAction);
         document.getElementById('reports-table')?.addEventListener('click', this.handleReportsAction);
         document.getElementById('solutions-list')?.addEventListener('click', this.handleSolutionsAction);
+        document.getElementById('components-list')?.addEventListener('click', this.handleComponentListAction.bind(this)); /* [NOVO] */
+        document.getElementById('add-component-btn')?.addEventListener('click', this.addComponent.bind(this)); /* [NOVO] */
+        document.getElementById('clear-component-form-btn')?.addEventListener('click', () => this.clearComponentForm()); /* [NOVO] */
         document.getElementById('patients-list')?.addEventListener('click', this.handlePatientListAction.bind(this)); 
 
         document.getElementById('add-solution-btn')?.addEventListener('click', () => this.editSolution()); 
@@ -850,12 +901,14 @@ class NutriSoft {
     }
     renderUIAllSections() { 
         console.log("NutriSoft.renderUIAllSections: Rendering all dynamic UI content...");
-        this.renderPatients(); 
-        this.renderPatientsList(); 
+        this.renderPatients();
+        this.renderPatientsList();
+        this.updatePatientsDatalist(); /* [NOVO] */
         this.renderPrescriptionHistory(); 
         this.renderReports(); 
-        this.renderSolutions(); 
-        this.renderEvolutionPatientSelect(); 
+        this.renderSolutions();
+        this.renderComponents(); /* [NOVO] */
+        this.renderEvolutionPatientSelect();
         console.log("NutriSoft.renderUIAllSections: All sections rendering process initiated.");
     }
     renderSolutions() { 
@@ -1013,7 +1066,8 @@ class NutriSoft {
                 <button data-action="delete" data-id="${patient.id}" class="table-action-btn text-red-600 hover:text-red-800 focus:outline-none focus:ring-2 focus:ring-red-500" title="Eliminar Doente"><i class="fas fa-trash"></i></button>
             `;
         });
-        this.checkAccessPermissions(); 
+        this.checkAccessPermissions();
+        this.updatePatientsDatalist(); /* [NOVO] */
     }
     renderPatientEvolution(patientId) { 
          const tbody = document.getElementById('patient-evolution-history');
@@ -1340,6 +1394,7 @@ class NutriSoft {
             }
 
             this.dataManager.savePatients(this.patients);
+            EventBus.emit('patientsChanged', this.patients); /* [NOVO] */
             AuditLogger.log(logAction, { patientId: patientData.id, name: patientData.name });
             this.dataManager.displayNotification(userFeedback, 'success');
             this.renderPatients(); 
@@ -1396,6 +1451,7 @@ class NutriSoft {
 
             this.dataManager.savePatients(this.patients);
             this.dataManager.savePrescriptions(this.prescriptions);
+            EventBus.emit('patientsChanged', this.patients); /* [NOVO] */
 
             AuditLogger.log('deletePatient', { patientId: patientId, patientName: patientName, deletedPrescriptions: deletedPrescriptionsCount });
             this.dataManager.displayNotification(`Doente "${patientName}" e ${deletedPrescriptionsCount} prescrição(ões) associada(s) foram excluído(s) com sucesso!`, 'success');
@@ -2645,9 +2701,20 @@ class NutriSoft {
                 return currentY + (lines.length * (fontSize * 0.352778 * 1.2)); 
             };
 
-            doc.setFontSize(16); doc.setFont(undefined, 'bold');
-            doc.text('Prescrição de Nutrição Parentérica', pageWidth / 2, y, { align: 'center' });
-            y += lineSpacing * 2;
+            /* [NOVO] cabeçalho com logo e info do paciente */
+            const logoImg = document.querySelector('img[src="ULSSMsgtf.jpg"]');
+            if (logoImg) {
+                const canvas = document.createElement('canvas');
+                canvas.width = logoImg.naturalWidth; canvas.height = logoImg.naturalHeight;
+                canvas.getContext('2d').drawImage(logoImg, 0, 0);
+                doc.addImage(canvas.toDataURL('image/jpeg'), 'JPEG', margin, y, 25, 15);
+            }
+            doc.setFontSize(14); doc.setFont(undefined, 'bold');
+            doc.text('Prescrição Nutrição Parentérica', pageWidth - margin, y + 5, { align: 'right' });
+            doc.setFontSize(10); doc.setFont(undefined, 'normal');
+            doc.text(`Paciente: ${patientName}`, pageWidth - margin, y + 11, { align: 'right' });
+            doc.text(`Data: ${new Date(prescriptionDate).toLocaleDateString()}`, pageWidth - margin, y + 16, { align: 'right' });
+            y += 22;
 
             doc.setFontSize(10); doc.setFont(undefined, 'normal');
             doc.text(`Número Preparação: ${preparationNumber}`, margin, y);
@@ -3038,7 +3105,7 @@ class NutriSoft {
             console.log(`NutriSoft.deleteSolution: Deletion of solution ${solutionName} cancelled by user.`);
         }
     }
-    clearSolutionForm(hideModal = true) { 
+    clearSolutionForm(hideModal = true) {
         console.log("NutriSoft.clearSolutionForm: Clearing solution form. Hide modal:", hideModal);
         const form = document.getElementById('solution-form');
         if (form) {
@@ -3061,7 +3128,68 @@ class NutriSoft {
             if (modal) modal.classList.add('hidden');
             document.body.style.overflow = ''; 
             AuditLogger.log('clearSolutionFormAndModal');
-        } 
+        }
+    }
+
+    /* [NOVO] adicionar componente */
+    addComponent() {
+        if (!this.validateInputs('component')) return;
+        const component = {
+            name: document.getElementById('component-name').value.trim(),
+            type: document.getElementById('component-type').value,
+            unit: document.getElementById('component-unit').value,
+            concentration: this.getNumericInput('component-concentration', null),
+            osmolarity: this.getNumericInput('component-osmolarity', null)
+        };
+        const existing = this.components.find(c => c.name === component.name);
+        if (existing) Object.assign(existing, component); else this.components.push(component);
+        this.dataManager.saveComponents(this.components);
+        EventBus.emit('componentsChanged', this.components);
+        this.renderComponents();
+        this.clearComponentForm();
+    }
+
+    clearComponentForm() {
+        const form = document.getElementById('component-form');
+        form?.reset();
+        form?.querySelectorAll('.input-field').forEach(i => this.hideErrorMessage(i));
+    }
+
+    renderComponents() {
+        const tbody = document.getElementById('components-list');
+        if (!tbody) return;
+        const tpl = tbody.querySelector('.no-results-row');
+        tbody.innerHTML = '';
+        if (tpl) tbody.appendChild(tpl.cloneNode(true));
+        const nr = tbody.querySelector('.no-results-row');
+        if (this.components.length === 0) { nr?.classList.remove('hidden'); return; }
+        nr?.classList.add('hidden');
+        this.components.forEach((c, idx) => {
+            const row = tbody.insertRow();
+            row.insertCell().textContent = c.name;
+            row.insertCell().textContent = c.type;
+            row.insertCell().textContent = c.unit;
+            row.insertCell().textContent = c.concentration ?? '-';
+            row.insertCell().textContent = c.osmolarity ?? '-';
+            const actions = row.insertCell();
+            actions.className = 'text-right';
+            actions.innerHTML = `<button data-action="delete" data-index="${idx}" class="table-action-btn text-red-600"><i class="fas fa-trash"></i></button>`;
+        });
+    }
+
+    deleteComponent(index) {
+        this.components.splice(index, 1);
+        this.dataManager.saveComponents(this.components);
+        this.renderComponents();
+        EventBus.emit('componentsChanged', this.components);
+    }
+
+    handleComponentListAction(e) {
+        const btn = e.target.closest('button[data-action]');
+        if (!btn) return;
+        if (btn.dataset.action === 'delete') {
+            this.deleteComponent(parseInt(btn.dataset.index));
+        }
     }
 } 
 
@@ -3071,10 +3199,15 @@ let app;
 
 document.addEventListener('DOMContentLoaded', () => {
     console.log("DOM fully loaded and parsed.");
+    initTheme(); /* [NOVO] */
     try {
         app = new NutriSoft();
         app.init();
+        EventBus.on('patientsChanged', () => app.updatePatientsDatalist()); /* [NOVO] */
         console.log("NutriSoft application instance created and initialized successfully.");
+
+        const themeBtn = document.getElementById('theme-toggle-btn');
+        themeBtn?.addEventListener('click', toggleTheme); /* [NOVO] */
 
         if (!window.location.hash || window.location.hash === "#") {
             console.log("Initial hash is empty or '#', forcing to #patients for robust startup.");

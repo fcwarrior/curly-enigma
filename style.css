@@ -9,6 +9,16 @@ body {
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
 }
+/* [NOVO] dark mode */
+.dark body {
+    background-color: #1f2937;
+    color: #f9fafb;
+}
+
+.highlight-volume {
+    color: #2563eb; /* [NOVO] */
+    font-weight: 700;
+}
 
 #macro-suggestion {
     color: #0284c7;
