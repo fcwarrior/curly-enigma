@@ -244,6 +244,9 @@ class AuditLogger {
                 const logs = app.dataManager.getAuditLogs() || [];
                 logs.push(logEntry);
                 app.dataManager.saveAuditLogs(logs);
+                if (typeof app.renderPerformanceStats === 'function') {
+                    app.renderPerformanceStats();
+                }
             } catch (error) { console.error("AuditLogger: Error during logging:", error, {action, details}); }
         } else { console.warn("AuditLogger: Skipping log - app or app.dataManager not fully initialized.", { action, details }); }
     }
@@ -386,8 +389,9 @@ class NutriSoft {
                     this.renderPrescriptionHistory(); 
                     break;
                 case 'evolution': this.renderEvolutionPatientSelect(); break;
+                case 'performance': this.renderPerformanceStats(); break;
                 case 'solutions': this.renderSolutions(); break;
-                case 'settings': this.renderAuditLogs(); break; 
+                case 'settings': this.renderAuditLogs(); break;
                 case 'patients':
                      this.renderPatientsList();
                      this.renderPatients(); 
@@ -836,10 +840,11 @@ class NutriSoft {
         console.log("NutriSoft.renderUIAllSections: Rendering all dynamic UI content...");
         this.renderPatients(); 
         this.renderPatientsList(); 
-        this.renderPrescriptionHistory(); 
-        this.renderReports(); 
-        this.renderSolutions(); 
-        this.renderEvolutionPatientSelect(); 
+        this.renderPrescriptionHistory();
+        this.renderReports();
+        this.renderPerformanceStats();
+        this.renderSolutions();
+        this.renderEvolutionPatientSelect();
         console.log("NutriSoft.renderUIAllSections: All sections rendering process initiated.");
     }
     renderSolutions() { 
@@ -2792,7 +2797,7 @@ class NutriSoft {
         noResultsRow?.classList.add('hidden');
 
         logs.forEach(log => {
-            const row = tbody.insertRow(tbody.rows.length - (noResultsRow ? 1 : 0)); 
+            const row = tbody.insertRow(tbody.rows.length - (noResultsRow ? 1 : 0));
             row.classList.add('hover:bg-gray-50');
             let detailsText = '';
             try {
@@ -2805,10 +2810,54 @@ class NutriSoft {
                 <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${log.timestamp ? new Date(log.timestamp).toLocaleString() : '-'}</td>
                 <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${log.user || '-'}</td>
                 <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-700">${log.action || '-'}</td>
-                <td class="px-6 py-4 text-sm text-gray-500 break-all max-w-xs" title="${JSON.stringify(log.details, null, 2)}">${detailsText}</td>`; 
+                <td class="px-6 py-4 text-sm text-gray-500 break-all max-w-xs" title="${JSON.stringify(log.details, null, 2)}">${detailsText}</td>`;
         });
     }
-    editSolution(solutionName = null) { 
+
+    getPerformanceStats() {
+        const logs = this.dataManager.getAuditLogs() || [];
+        const currentUser = this.dataManager.getUserName();
+        const stats = {
+            addedPatients: 0,
+            editedPatients: 0,
+            deletedPatients: 0,
+            newPrescriptions: 0,
+            editedPrescriptions: 0,
+            deletedPrescriptions: 0
+        };
+
+        logs.forEach(log => {
+            if (log.user !== currentUser) return;
+            switch (log.action) {
+                case 'addPatient': stats.addedPatients++; break;
+                case 'editPatient': stats.editedPatients++; break;
+                case 'deletePatient': stats.deletedPatients++; break;
+                case 'savePrescriptionNew': stats.newPrescriptions++; break;
+                case 'editPrescriptionSaved': stats.editedPrescriptions++; break;
+                case 'deletePrescriptionConfirmed': stats.deletedPrescriptions++; break;
+            }
+        });
+
+        return stats;
+    }
+
+    renderPerformanceStats() {
+        const container = document.getElementById('performance-stats');
+        if (!container) {
+            console.warn('renderPerformanceStats: performance-stats container not found.');
+            return;
+        }
+        const stats = this.getPerformanceStats();
+        container.innerHTML = `
+            <p><strong>Doentes Adicionados:</strong> ${stats.addedPatients}</p>
+            <p><strong>Doentes Editados:</strong> ${stats.editedPatients}</p>
+            <p><strong>Doentes Excluídos:</strong> ${stats.deletedPatients}</p>
+            <p><strong>Prescrições Novas:</strong> ${stats.newPrescriptions}</p>
+            <p><strong>Prescrições Editadas:</strong> ${stats.editedPrescriptions}</p>
+            <p><strong>Prescrições Excluídas:</strong> ${stats.deletedPrescriptions}</p>
+        `;
+    }
+    editSolution(solutionName = null) {
         console.log(`NutriSoft.editSolution: Opening solution form. Editing: ${solutionName || 'New Solution'}`);
         const isEditing = !!solutionName;
         const solution = isEditing ? (this.solutions[solutionName] || {}) : {};
