@@ -244,6 +244,9 @@ class AuditLogger {
                 const logs = app.dataManager.getAuditLogs() || [];
                 logs.push(logEntry);
                 app.dataManager.saveAuditLogs(logs);
+                if (typeof app.renderPerformanceStats === 'function') {
+                    app.renderPerformanceStats();
+                }
             } catch (error) { console.error("AuditLogger: Error during logging:", error, {action, details}); }
         } else { console.warn("AuditLogger: Skipping log - app or app.dataManager not fully initialized.", { action, details }); }
     }
@@ -316,7 +319,8 @@ class NutriSoft {
     initSolutions() { 
         // Added osmolarity contribution values (estimates, should be verified)
         this.solutions = {
-            'AMINOVEN 10%': { type: 'aminoacid', nitrogen_concentration: 15.6, protein_concentration: 100, osmolarityContribution: 900 }, // Approx. g/L for protein_concentration
+            // 500 mL contêm cerca de 8 g de azoto e 50 g de proteína equivalente
+            'AMINOVEN 10%': { type: 'aminoacid', nitrogen_concentration: 16, protein_concentration: 100, osmolarityContribution: 900 },
             'VAMINOLACT': { type: 'aminoacid', nitrogen_concentration: 7.6, protein_concentration: 47.5, osmolarityContribution: 800 }, // Approx. g/L
             'DIPEPTIVEN 200mg/ml': { type: 'glutamine', glutamine_concentration: 200, nitrogen_concentration: 32.6, osmolarityContribution: 900 }, // glutamine_concentration in mg/mL, nitrogen_concentration in g/L
             'GLUCOSE 50%': { type: 'glucose', glucose_concentration: 500, osmolarityContribution: 2775 }, // glucose_concentration in g/L
@@ -386,8 +390,9 @@ class NutriSoft {
                     this.renderPrescriptionHistory(); 
                     break;
                 case 'evolution': this.renderEvolutionPatientSelect(); break;
+                case 'performance': this.renderPerformanceStats(); break;
                 case 'solutions': this.renderSolutions(); break;
-                case 'settings': this.renderAuditLogs(); break; 
+                case 'settings': this.renderAuditLogs(); break;
                 case 'patients':
                      this.renderPatientsList();
                      this.renderPatients(); 
@@ -836,10 +841,11 @@ class NutriSoft {
         console.log("NutriSoft.renderUIAllSections: Rendering all dynamic UI content...");
         this.renderPatients(); 
         this.renderPatientsList(); 
-        this.renderPrescriptionHistory(); 
-        this.renderReports(); 
-        this.renderSolutions(); 
-        this.renderEvolutionPatientSelect(); 
+        this.renderPrescriptionHistory();
+        this.renderReports();
+        this.renderPerformanceStats();
+        this.renderSolutions();
+        this.renderEvolutionPatientSelect();
         console.log("NutriSoft.renderUIAllSections: All sections rendering process initiated.");
     }
     renderSolutions() { 
@@ -1115,10 +1121,11 @@ class NutriSoft {
             fieldsToValidate.push({ id: 'protein-needs', required: true, type: 'number', min: 0, message: 'Necessidades proteicas devem ser >= 0.' });
             fieldsToValidate.push({ id: 'lipid-needs', required: true, type: 'number', min: 0, message: 'Necessidades lipídicas devem ser >= 0.' });
             fieldsToValidate.push({ id: 'glucose-rate', required: true, type: 'number', min: 0, message: 'Taxa de glucose deve ser >= 0.' });
-            ['sodium-needs', 'potassium-needs', 'magnesium-needs', 'calcium-needs', 'phosphorus-needs',
+            ['nitrogen-administered', 'glucose-administered', 'lipid-administered',
+             'sodium-needs', 'potassium-needs', 'magnesium-needs', 'calcium-needs', 'phosphorus-needs',
              'oligoelements-volume', 'water-soluble-vitamins-volume', 'fat-soluble-vitamins-volume',
              'insulin-rate', 'heparin-rate', 'carnitine-needs'].forEach(id => {
-                fieldsToValidate.push({ id: id, type: 'number', min: 0, message: 'Valor deve ser numérico e >= 0 se preenchido.' }); 
+                fieldsToValidate.push({ id: id, type: 'number', min: 0, message: 'Valor deve ser numérico e >= 0 se preenchido.' });
             });
         } else if (section === 'solution') {
             fieldsToValidate.push({ id: 'solution-name', required: true, message: 'Nome da solução é obrigatório.' });
@@ -1402,12 +1409,19 @@ class NutriSoft {
         const defaults = { required: 0, solution: '', volume: 0, nitrogen: 0, error: null };
         if (!patient?.weight) return { ...defaults, error: "Peso do doente não disponível." };
 
-        // Obter a dose de proteína por kg (ex: 1.2 g/kg/dia)
-        const proteinNeedsPerKg = this.getNumericInput('protein-needs', 0, true);
-        if (isNaN(proteinNeedsPerKg)) return { ...defaults, error: "Necessidades proteicas inválidas." };
+        const nitrogenAdmin = this.getNumericInput('nitrogen-administered', NaN);
+        let proteinRequired;
+        let nitrogenProvided;
 
-        // Calcular a dose TOTAL de proteína (g/dia) → peso * dose/kg
-        const proteinRequired = proteinNeedsPerKg * patient.weight; 
+        if (!isNaN(nitrogenAdmin)) {
+            nitrogenProvided = nitrogenAdmin;
+            proteinRequired = nitrogenAdmin * 6.25; // conversão aproximada
+        } else {
+            const proteinNeedsPerKg = this.getNumericInput('protein-needs', 0, true);
+            if (isNaN(proteinNeedsPerKg)) return { ...defaults, error: "Necessidades proteicas inválidas." };
+            proteinRequired = proteinNeedsPerKg * patient.weight;
+            nitrogenProvided = proteinRequired / 6.25;
+        }
 
         // Obter solução selecionada (ex: AMINOVEN 10%)
         const aminoacidSolutionName = document.getElementById('amino-acids-solution')?.value;
@@ -1418,15 +1432,15 @@ class NutriSoft {
             return { ...defaults, required: proteinRequired, solution: aminoacidSolutionName, error: errorMsg };
         }
 
-        // Calcular volume necessário (mL) → dose_total / concentração (g/L → g/mL)
-        // protein_concentration is in g/L in this.solutions
-        const concentration_g_ml = aminoacidSolution.protein_concentration / 1000; 
-        const aminoacidVolume = concentration_g_ml > 0 ? proteinRequired / concentration_g_ml : 0;
-
-        // Calcular nitrogénio fornecido (se aplicável)
-        // nitrogen_concentration is in g/L in this.solutions
-        const nitrogen_g_ml = (aminoacidSolution.nitrogen_concentration ?? 0) / 1000; 
-        const nitrogenProvided = nitrogen_g_ml * aminoacidVolume;
+        const nitrogen_g_ml = (aminoacidSolution.nitrogen_concentration ?? 0) / 1000;
+        let aminoacidVolume;
+        if (!isNaN(nitrogenAdmin)) {
+            aminoacidVolume = nitrogen_g_ml > 0 ? nitrogenProvided / nitrogen_g_ml : 0;
+        } else {
+            const concentration_g_ml = aminoacidSolution.protein_concentration / 1000;
+            aminoacidVolume = concentration_g_ml > 0 ? proteinRequired / concentration_g_ml : 0;
+            nitrogenProvided = nitrogen_g_ml * aminoacidVolume;
+        }
 
         return { required: proteinRequired, solution: aminoacidSolutionName, volume: aminoacidVolume, nitrogen: nitrogenProvided, error: null };
     }
@@ -1467,12 +1481,16 @@ class NutriSoft {
         const defaults = { required: 0, solution: '', volume: 0, error: null };
         if (!patient?.weight) return { ...defaults, error: "Peso do doente não disponível." };
 
-        // Obter taxa de glucose (mg/kg/min)
-        const glucoseRate_mg_kg_min = this.getNumericInput('glucose-rate', 0, true);
-        if (isNaN(glucoseRate_mg_kg_min)) return { ...defaults, error: "Taxa de infusão de glucose inválida." };
+        const glucoseAdmin = this.getNumericInput('glucose-administered', NaN);
+        let glucoseRequired_g_day;
 
-        // Converter para g/dia: (mg/kg/min) * kg * 1440 min/dia / 1000 → g/dia
-        const glucoseRequired_g_day = (glucoseRate_mg_kg_min * patient.weight * 1440) / 1000;
+        if (!isNaN(glucoseAdmin)) {
+            glucoseRequired_g_day = glucoseAdmin;
+        } else {
+            const glucoseRate_mg_kg_min = this.getNumericInput('glucose-rate', 0, true);
+            if (isNaN(glucoseRate_mg_kg_min)) return { ...defaults, error: "Taxa de infusão de glucose inválida." };
+            glucoseRequired_g_day = (glucoseRate_mg_kg_min * patient.weight * 1440) / 1000;
+        }
 
         // Obter solução selecionada (ex: GLUCOSE 50%)
         const glucoseSolutionName = document.getElementById('glucose-solution')?.value;
@@ -1495,12 +1513,16 @@ class NutriSoft {
         const defaults = { required: 0, solution: '', volume: 0, error: null };
         if (!patient?.weight) return { ...defaults, error: "Peso do doente não disponível." };
 
-        // Obter a dose de lípidos por kg (ex: 1.0 g/kg/dia)
-        const lipidNeedsPerKg = this.getNumericInput('lipid-needs', 0, true);
-        if (isNaN(lipidNeedsPerKg)) return { ...defaults, error: "Necessidades lipídicas inválidas." };
+        const lipidAdmin = this.getNumericInput('lipid-administered', NaN);
+        let lipidRequired_g;
 
-        // Calcular a dose TOTAL de lípidos (g/dia) → peso * dose/kg
-        const lipidRequired_g = lipidNeedsPerKg * patient.weight;
+        if (!isNaN(lipidAdmin)) {
+            lipidRequired_g = lipidAdmin;
+        } else {
+            const lipidNeedsPerKg = this.getNumericInput('lipid-needs', 0, true);
+            if (isNaN(lipidNeedsPerKg)) return { ...defaults, error: "Necessidades lipídicas inválidas." };
+            lipidRequired_g = lipidNeedsPerKg * patient.weight;
+        }
 
         // Obter solução selecionada (ex: SMOFLIPID 200mg/ml)
         const lipidSolutionName = document.getElementById('lipids-solution')?.value;
@@ -1576,6 +1598,18 @@ class NutriSoft {
                 error: error
             };
         });
+
+        const phosEntry = electrolytes.phosphorus;
+        if (phosEntry && phosEntry.volume > 0) {
+            const phosSol = this.solutions[phosEntry.solution];
+            if (phosSol && phosSol.sodium_concentration) {
+                const extraNa = (phosEntry.volume * (phosSol.sodium_concentration / 1000));
+                if (!electrolytes.sodium) {
+                    electrolytes.sodium = { required: 0, solution: '', volume: 0, error: null };
+                }
+                electrolytes.sodium.extraFromPhosphorus = extraNa;
+            }
+        }
         return electrolytes;
     }
 
@@ -1767,10 +1801,13 @@ class NutriSoft {
             phosConcFinal_mmol_L = (phos.volume * (phosSol.phosphorus_concentration / 1000)) / (totalVolumePrescription / 1000);
         }
 
-        const caPhosSum = caConcFinal_mEq_L + phosConcFinal_mmol_L; 
-        if (caConcFinal_mEq_L > 0 && phosConcFinal_mmol_L > 0) { 
+        const caPhosSum = caConcFinal_mEq_L + phosConcFinal_mmol_L;
+        if (caConcFinal_mEq_L > 0 && phosConcFinal_mmol_L > 0) {
             if (caPhosSum > 45) errors.push(`Risco Elevado de Precipitação Ca/P: Soma [Ca(mEq/L)+P(mmol/L)] = ${caPhosSum.toFixed(1)} > 45. Consultar curvas de compatibilidade.`);
             else if (caPhosSum > 30) warnings.push(`Atenção Risco Precipitação Ca/P: Soma [Ca(mEq/L)+P(mmol/L)] = ${caPhosSum.toFixed(1)} > 30. Considerar ordem de adição e tipo de AA.`);
+            if ((ca?.solution || '').includes('GLUCONATO') && phos?.solution && !phos.solution.includes('GLICEROFOSFATO')) {
+                errors.push('Incompatibilidade conhecida: Gluconato de cálcio com fosfatos inorgânicos pode precipitar.');
+            }
         }
 
         const osmLimits = this.settings.osmolarityLimits || { peripheral: 900, central: 1500 };
@@ -1966,6 +2003,7 @@ class NutriSoft {
                 <br/>
                 ${listItem('Sódio', formulation.electrolytes?.sodium, 'required', 'mEq')}
                 ${listItem('  ↳ Volume NaCl', formulation.electrolytes?.sodium, 'volume', 'ml')}
+                ${formulation.electrolytes?.sodium?.extraFromPhosphorus ? `<li class="ml-5 text-sm text-gray-600">↳ Na do Fosfato: ${this.formatValue(formulation.electrolytes.sodium.extraFromPhosphorus, 'mEq', 0)}</li>` : ''}
                 ${listItem('Potássio', formulation.electrolytes?.potassium, 'required', 'mEq')}
                 ${listItem('  ↳ Volume KCl', formulation.electrolytes?.potassium, 'volume', 'ml')}
                 ${listItem('Magnésio', formulation.electrolytes?.magnesium, 'required', 'mEq')}
@@ -2353,6 +2391,9 @@ class NutriSoft {
             const glucose_g_day = formulation.glucose?.required ?? 0;
             const GIR_mg_kg_min = (glucose_g_day * 1000) / (patientWeight * 1440);
             this.setInputValue('glucose-rate', GIR_mg_kg_min.toFixed(2));
+            this.setInputValue('nitrogen-administered', formulation.proteins?.nitrogen ?? '');
+            this.setInputValue('glucose-administered', formulation.glucose?.required ?? '');
+            this.setInputValue('lipid-administered', formulation.lipids?.required ?? '');
 
             this.setInputValue('sodium-needs', (formulation.electrolytes?.sodium?.required / patientWeight).toFixed(2));
             this.setInputValue('potassium-needs', (formulation.electrolytes?.potassium?.required / patientWeight).toFixed(2));
@@ -2360,7 +2401,8 @@ class NutriSoft {
             this.setInputValue('calcium-needs', (formulation.electrolytes?.calcium?.required / patientWeight).toFixed(2));
             this.setInputValue('carnitine-needs', ((formulation.additives?.carnitine?.required ?? 0) / patientWeight).toFixed(2) || '20'); 
         } else { 
-            ['protein-needs', 'lipid-needs', 'glucose-rate', 'sodium-needs', 'potassium-needs', 'magnesium-needs', 'calcium-needs', 'carnitine-needs'].forEach(id => this.setInputValue(id, ''));
+            ['protein-needs', 'lipid-needs', 'glucose-rate', 'sodium-needs', 'potassium-needs', 'magnesium-needs', 'calcium-needs', 'carnitine-needs',
+             'nitrogen-administered', 'glucose-administered', 'lipid-administered'].forEach(id => this.setInputValue(id, ''));
         }
         this.setInputValue('phosphorus-needs', formulation.electrolytes?.phosphorus?.required ?? ''); 
 
@@ -2792,7 +2834,7 @@ class NutriSoft {
         noResultsRow?.classList.add('hidden');
 
         logs.forEach(log => {
-            const row = tbody.insertRow(tbody.rows.length - (noResultsRow ? 1 : 0)); 
+            const row = tbody.insertRow(tbody.rows.length - (noResultsRow ? 1 : 0));
             row.classList.add('hover:bg-gray-50');
             let detailsText = '';
             try {
@@ -2805,10 +2847,54 @@ class NutriSoft {
                 <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${log.timestamp ? new Date(log.timestamp).toLocaleString() : '-'}</td>
                 <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${log.user || '-'}</td>
                 <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-700">${log.action || '-'}</td>
-                <td class="px-6 py-4 text-sm text-gray-500 break-all max-w-xs" title="${JSON.stringify(log.details, null, 2)}">${detailsText}</td>`; 
+                <td class="px-6 py-4 text-sm text-gray-500 break-all max-w-xs" title="${JSON.stringify(log.details, null, 2)}">${detailsText}</td>`;
         });
     }
-    editSolution(solutionName = null) { 
+
+    getPerformanceStats() {
+        const logs = this.dataManager.getAuditLogs() || [];
+        const currentUser = this.dataManager.getUserName();
+        const stats = {
+            addedPatients: 0,
+            editedPatients: 0,
+            deletedPatients: 0,
+            newPrescriptions: 0,
+            editedPrescriptions: 0,
+            deletedPrescriptions: 0
+        };
+
+        logs.forEach(log => {
+            if (log.user !== currentUser) return;
+            switch (log.action) {
+                case 'addPatient': stats.addedPatients++; break;
+                case 'editPatient': stats.editedPatients++; break;
+                case 'deletePatient': stats.deletedPatients++; break;
+                case 'savePrescriptionNew': stats.newPrescriptions++; break;
+                case 'editPrescriptionSaved': stats.editedPrescriptions++; break;
+                case 'deletePrescriptionConfirmed': stats.deletedPrescriptions++; break;
+            }
+        });
+
+        return stats;
+    }
+
+    renderPerformanceStats() {
+        const container = document.getElementById('performance-stats');
+        if (!container) {
+            console.warn('renderPerformanceStats: performance-stats container not found.');
+            return;
+        }
+        const stats = this.getPerformanceStats();
+        container.innerHTML = `
+            <p><strong>Doentes Adicionados:</strong> ${stats.addedPatients}</p>
+            <p><strong>Doentes Editados:</strong> ${stats.editedPatients}</p>
+            <p><strong>Doentes Excluídos:</strong> ${stats.deletedPatients}</p>
+            <p><strong>Prescrições Novas:</strong> ${stats.newPrescriptions}</p>
+            <p><strong>Prescrições Editadas:</strong> ${stats.editedPrescriptions}</p>
+            <p><strong>Prescrições Excluídas:</strong> ${stats.deletedPrescriptions}</p>
+        `;
+    }
+    editSolution(solutionName = null) {
         console.log(`NutriSoft.editSolution: Opening solution form. Editing: ${solutionName || 'New Solution'}`);
         const isEditing = !!solutionName;
         const solution = isEditing ? (this.solutions[solutionName] || {}) : {};
