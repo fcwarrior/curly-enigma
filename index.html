@@ -62,6 +62,7 @@
                     <button id="prescription-nav-btn" class="nav-btn" title="Criar ou Ver Prescrições"> <i class="fas fa-prescription mr-1"></i>Prescrições </button>
                     <button id="reports-nav-btn" class="nav-btn" title="Ver Relatórios de Prescrições"> <i class="fas fa-chart-bar mr-1"></i>Relatórios </button>
                     <button id="evolution-nav-btn" class="nav-btn" title="Ver Evolução do Doente"> <i class="fas fa-chart-line mr-1"></i>Evolução </button>
+                    <button id="performance-nav-btn" class="nav-btn" title="Avaliação de Desempenho"> <i class="fas fa-tachometer-alt mr-1"></i>Desempenho </button>
                     <button id="solutions-nav-btn" class="nav-btn hidden" title="Gerir Soluções (Admin)"> <i class="fas fa-flask mr-1"></i>Soluções </button> <!-- Hidden by default, shown by JS based on permissions -->
                     <button id="settings-nav-btn" class="nav-btn hidden" title="Configurações (Admin)"> <i class="fas fa-cog mr-1"></i>Configurações </button> <!-- Hidden by default, shown by JS -->
                     <!-- Options Dropdown for Data Management -->
@@ -238,6 +239,21 @@
                             <label for="glucose-rate" class="block text-sm font-medium text-gray-700">Glucose (mg/kg/min) <span class="text-red-500">*</span></label>
                             <input type="number" id="glucose-rate" class="input-field mt-1 w-full" placeholder="Ex: 4" step="0.1" min="0" title="Taxa de infusão de glucose em mg/kg/min (obrigatório, >= 0)" value="4" required>
                             <p id="glucose-rate-error" class="error-message hidden text-sm" aria-live="polite"></p>
+                        </div>
+                        <div class="form-group">
+                            <label for="nitrogen-admin" class="block text-sm font-medium text-gray-700">Nitrogénio Administrado (g/dia)</label>
+                            <input type="number" id="nitrogen-admin" class="input-field mt-1 w-full" placeholder="Ex: 8" step="0.1" min="0" title="Total de nitrogénio realmente administrado em g/dia (opcional)">
+                            <p id="nitrogen-admin-error" class="error-message hidden text-sm" aria-live="polite"></p>
+                        </div>
+                        <div class="form-group">
+                            <label for="lipid-admin" class="block text-sm font-medium text-gray-700">Lípidos Administrados (g/dia)</label>
+                            <input type="number" id="lipid-admin" class="input-field mt-1 w-full" placeholder="Ex: 60" step="1" min="0" title="Total de lípidos administrados em g/dia (opcional)">
+                            <p id="lipid-admin-error" class="error-message hidden text-sm" aria-live="polite"></p>
+                        </div>
+                        <div class="form-group">
+                            <label for="glucose-admin" class="block text-sm font-medium text-gray-700">Glucose Administrada (g/dia)</label>
+                            <input type="number" id="glucose-admin" class="input-field mt-1 w-full" placeholder="Ex: 250" step="1" min="0" title="Total de glucose administrada em g/dia (opcional)">
+                            <p id="glucose-admin-error" class="error-message hidden text-sm" aria-live="polite"></p>
                         </div>
                     </div>
                 </fieldset>
@@ -594,6 +610,14 @@
              <!-- Import/Export Settings Section -->
             <!-- Combined with Data I/E buttons in header dropdown -->
 
+        </section>
+
+        <!-- Performance Section -->
+        <section id="performance-section" class="section hidden bg-white rounded-lg shadow-md p-6 mb-8">
+            <h2 class="text-2xl font-semibold mb-4 flex items-center"><i class="fas fa-tachometer-alt mr-2"></i>Desempenho Individual</h2>
+            <div id="performance-stats" class="space-y-4">
+                <!-- Stats inserted by JS -->
+            </div>
         </section>
 
         <!-- Hidden file inputs for import functionality -->
