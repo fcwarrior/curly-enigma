@@ -116,7 +116,43 @@ class DataManager {
             autoSaveIntervalMinutes: 5,
             accessLevel: 'basic',
             permissions: { exportData: false },
-            osmolarityLimits: { peripheral: 900, central: 1500 }
+            osmolarityLimits: { peripheral: 900, central: 1500 },
+            patientCategories: [
+                {
+                    id: 'cat-adult',
+                    name: 'Adulto',
+                    ageStart: 18,
+                    ageEnd: 99,
+                    substanceLimits: {
+                        nitrogen: { softUpper: 2, hardUpper: 2.5, unit: 'g/kg' },
+                        glucose_GIR: { softUpper: 5, hardUpper: 7, unit: 'mg/kg/min' },
+                        calcium: { hardUpper: 0.2, unit: 'mEq/kg' }
+                    }
+                }
+            ],
+            protocols: [
+                {
+                    id: 'proto-adult-standard',
+                    name: 'Adulto - Protocolo Padrão',
+                    patientCategoryId: 'cat-adult',
+                    dailyTemplates: [
+                        {
+                            day: 1,
+                            inputs: {
+                                nitrogen: 8,
+                                glucose: 150,
+                                lipids: 70,
+                                sodium: 80,
+                                potassium: 60,
+                                calcium: 9.3,
+                                magnesium: 16,
+                                phosphorus: 20,
+                                traceElements: 10
+                            }
+                        }
+                    ]
+                }
+            ]
         };
         const savedSettings = this.getData(this.settingsKey);
         return {
@@ -579,6 +615,10 @@ class NutriSoft {
             this.updateSolutionFormFieldsVisibility(event.target.value);
         });
 
+        document.getElementById('prescription-protocol')?.addEventListener('change', (e) => {
+            this.applyProtocol(e.target.value);
+        });
+
         const evolutionPatientSelect = document.getElementById('evolution-patient-select');
         evolutionPatientSelect?.addEventListener('change', () => {
              const patientId = evolutionPatientSelect.value;
@@ -838,8 +878,9 @@ class NutriSoft {
     }
     renderUIAllSections() { 
         console.log("NutriSoft.renderUIAllSections: Rendering all dynamic UI content...");
-        this.renderPatients(); 
-        this.renderPatientsList(); 
+        this.renderPatients();
+        this.renderProtocolOptions();
+        this.renderPatientsList();
         this.renderPrescriptionHistory();
         this.renderReports();
         this.renderPerformanceStats();
@@ -1002,7 +1043,46 @@ class NutriSoft {
                 <button data-action="delete" data-id="${patient.id}" class="table-action-btn text-red-600 hover:text-red-800 focus:outline-none focus:ring-2 focus:ring-red-500" title="Eliminar Doente"><i class="fas fa-trash"></i></button>
             `;
         });
-        this.checkAccessPermissions(); 
+        this.checkAccessPermissions();
+    }
+
+    renderProtocolOptions() {
+        const select = document.getElementById('prescription-protocol');
+        if (!select) {
+            console.warn("renderProtocolOptions: select not found.");
+            return;
+        }
+        const currentVal = select.value;
+        select.innerHTML = '<option value="">Nenhum</option>';
+        (this.settings.protocols || []).forEach(proto => {
+            const opt = document.createElement('option');
+            opt.value = proto.id;
+            opt.textContent = proto.name;
+            if (proto.id === currentVal) opt.selected = true;
+            select.appendChild(opt);
+        });
+    }
+
+    applyProtocol(protocolId) {
+        if (!protocolId) return;
+        const protocol = (this.settings.protocols || []).find(p => p.id === protocolId);
+        if (!protocol) return;
+        const template = protocol.dailyTemplates?.[0];
+        if (!template?.inputs) return;
+        const patient = this.getSelectedPatient();
+        const weight = patient?.weight || 0;
+        const inputs = template.inputs;
+        if (inputs.nitrogen) this.setInputValue('nitrogen-admin', inputs.nitrogen);
+        if (inputs.glucose) this.setInputValue('glucose-admin', inputs.glucose);
+        if (inputs.lipids) this.setInputValue('lipid-admin', inputs.lipids);
+        if (weight > 0) {
+            if (inputs.sodium) this.setInputValue('sodium-needs', (inputs.sodium / weight).toFixed(2));
+            if (inputs.potassium) this.setInputValue('potassium-needs', (inputs.potassium / weight).toFixed(2));
+            if (inputs.magnesium) this.setInputValue('magnesium-needs', (inputs.magnesium / weight).toFixed(2));
+            if (inputs.calcium) this.setInputValue('calcium-needs', (inputs.calcium / weight).toFixed(2));
+        }
+        if (inputs.phosphorus) this.setInputValue('phosphorus-needs', inputs.phosphorus);
+        if (inputs.traceElements) this.setInputValue('oligoelements-volume', inputs.traceElements);
     }
     renderPatientEvolution(patientId) { 
          const tbody = document.getElementById('patient-evolution-history');
@@ -1871,8 +1951,10 @@ class NutriSoft {
         }
 
         try {
+            const protocolId = document.getElementById('prescription-protocol')?.value || '';
             const formulation = {
-                patient: patient, 
+                patient: patient,
+                protocolId: protocolId,
                 volume: totalVolume, // Prescribed total volume
                 route: administrationRoute,
                 proteins: this.calculateProteins(patient),
@@ -2170,9 +2252,10 @@ class NutriSoft {
 
         const preparation = {
             preparationNumber: existingPrescription ? existingPrescription.preparationNumber : this.dataManager.getNextPreparationNumber(),
-            patientId: formulation.patient.id, 
-            patientName: formulation.patient.name, 
-            date: new Date().toISOString().split('T')[0], 
+            patientId: formulation.patient.id,
+            patientName: formulation.patient.name,
+            protocolId: formulation.protocolId || '',
+            date: new Date().toISOString().split('T')[0],
             volume: formulation.volume,
             osmolarity: formulation.osmolarity,
             preparationMap: this.generatePreparationMap(formulation), 
@@ -2422,6 +2505,7 @@ class NutriSoft {
         this.setInputValue('cacl2-solution', formulation.electrolytes?.calcium?.solution); 
         this.setInputValue('mgso4-solution', formulation.electrolytes?.magnesium?.solution);
         this.setInputValue('phosphorus-solution', formulation.electrolytes?.phosphorus?.solution);
+        this.setInputValue('prescription-protocol', formulation.protocolId || '');
     }
     printPrescription(originalIndex = null) { 
         console.log("NutriSoft.printPrescription: Preparing to print. Original Index:", originalIndex);
