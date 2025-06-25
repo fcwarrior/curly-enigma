@@ -2755,6 +2755,7 @@ class NutriSoft {
             y += lineSpacing * 2;
             doc.text(`Data Impressão: ${new Date().toLocaleString()}`, margin, y);
 
+            this.generateLabelsPage(doc, formulation, preparationNumber, patientName, prescriptionDate);
             const filename = `Prescricao_NP_${String(preparationNumber).replace(/\W/g, '')}_${patientName.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}.pdf`;
             doc.save(filename);
             console.log("PDF generated:", filename);
@@ -2764,7 +2765,7 @@ class NutriSoft {
             AuditLogger.log('exportPDFError', { prepId: preparationNumber, error: error.message, stack: error.stack });
         }
     }
-    formatCompositionDetailsForPDF(formulation) { 
+    formatCompositionDetailsForPDF(formulation) {
         const details = [];
         const formatLine = (label, component, valueKey = 'volume', unit = 'ml', dp = 2) => {
              if (!component || component[valueKey] === undefined || component[valueKey] === null || (component[valueKey] === 0 && (label.toLowerCase().includes('volume') || unit ==='ml'))) return null;
@@ -2826,22 +2827,38 @@ class NutriSoft {
 
         return details.filter(line => line !== null).join('\n');
     }
-    addLabelContent(doc, formulation, startX, startY, isLipidsLabel, preparationNumber, patientName, prescriptionDate) { 
+    generateLabelsPage(doc, formulation, prepNum, patientName, prescriptionDate) {
+        const labelWidth = 90, labelHeight = 50;
+        const marginX = 10, marginY = 10, gapX = 10, gapY = 10;
+        const isTwoBags = (formulation.patient?.weight < 5 && formulation.patient?.condition === 'pediatric') || (formulation.patient?.condition === 'neonate');
+        const labels = isTwoBags ? [false, false, true, true] : [false, false, false, false];
+        doc.addPage();
+        labels.forEach((isLipids, idx) => {
+            if (idx > 0 && idx % 4 === 0) doc.addPage();
+            const col = idx % 2;
+            const row = Math.floor((idx % 4) / 2);
+            const x = marginX + col * (labelWidth + gapX);
+            const y = marginY + row * (labelHeight + gapY);
+            this.addLabelContent(doc, formulation, x, y, isLipids, prepNum, patientName, prescriptionDate);
+        });
+    }
+    addLabelContent(doc, formulation, startX, startY, isLipidsLabel, preparationNumber, patientName, prescriptionDate) {
         const labelWidth = 90; const labelHeight = 50; const padding = 5;
         const textStartX = startX + padding;
         let currentY = startY + padding;
-        const lineSpacingLabel = 4; 
+        const lineSpacingLabel = 4;
 
-        doc.setDrawColor(0); doc.rect(startX, startY, labelWidth, labelHeight); 
+        doc.setDrawColor(0); doc.setLineWidth(0.3); doc.rect(startX, startY, labelWidth, labelHeight);
 
-        doc.setFontSize(8); doc.setFont(undefined, 'italic');
-        doc.text('<<ULSSM - SG TF>>', textStartX, currentY); currentY += lineSpacingLabel * 0.8;
+        doc.setFontSize(9); doc.setFont(undefined, 'italic');
+        doc.text('ULSSM - SG TF', textStartX, currentY); currentY += lineSpacingLabel * 0.9;
 
-        doc.setFontSize(11); doc.setFont(undefined, 'bold');
-        doc.text(`#Prep: ${preparationNumber}`, textStartX, currentY); currentY += lineSpacingLabel * 1.1;
+        doc.setFontSize(12); doc.setFont(undefined, 'bold');
+        doc.text(`#Prep: ${preparationNumber}`, textStartX, currentY); currentY += lineSpacingLabel * 1.2;
 
         const maxNameWidthChars = 35; 
         const displayName = patientName.length > maxNameWidthChars ? patientName.substring(0, maxNameWidthChars) + "..." : patientName;
+        doc.setFontSize(10); doc.setFont(undefined, 'bold');
         doc.text(`Paciente: ${displayName}`, textStartX, currentY); currentY += lineSpacingLabel * 1.1;
 
         doc.setFontSize(9); doc.setFont(undefined, 'bold');
@@ -2870,6 +2887,7 @@ class NutriSoft {
             const lipidVol = (formulation.lipids?.volume??0) + (formulation.additives?.fat_soluble_vitamins?.volume??0);
             bagVol = isLipidsLabel ? lipidVol : formulation.volume - lipidVol;
         }
+        doc.setFontSize(9); doc.setFont(undefined, 'normal');
         doc.text(`Volume: ${this.formatValue(bagVol, 'ml', 0)}`, textStartX, currentY); currentY += lineSpacingLabel;
         doc.text(`Validade: (Definir conforme protocolo)`, textStartX, currentY); currentY += lineSpacingLabel;
 
