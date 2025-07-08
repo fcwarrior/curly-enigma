@@ -114,8 +114,8 @@ class DataManager {
             autoSaveEnabled: false,
             autoExportEnabled: false,
             autoSaveIntervalMinutes: 5,
-            accessLevel: 'basic',
-            permissions: { exportData: false },
+            accessLevel: 'admin',
+            permissions: { exportData: true },
             osmolarityLimits: { peripheral: 900, central: 1500 },
             patientCategories: [
                 {
@@ -487,7 +487,7 @@ class NutriSoft {
         if (autoSaveIntervalInput) autoSaveIntervalInput.value = settings.autoSaveIntervalMinutes ?? 5; else console.warn("loadSettings: autoSaveIntervalInput not found");
         if (autoSaveCheckbox) autoSaveCheckbox.checked = settings.autoSaveEnabled ?? false; else console.warn("loadSettings: autoSaveCheckbox not found");
         if (autoExportCheckbox) autoExportCheckbox.checked = settings.autoExportEnabled ?? false; else console.warn("loadSettings: autoExportCheckbox not found");
-        if (accessLevelSelect) accessLevelSelect.value = settings.accessLevel ?? 'basic'; else console.warn("loadSettings: accessLevelSelect not found");
+        if (accessLevelSelect) accessLevelSelect.value = settings.accessLevel ?? 'admin'; else console.warn("loadSettings: accessLevelSelect not found");
         if (permExportCheckbox) permExportCheckbox.checked = settings.permissions?.exportData ?? false; else console.warn("loadSettings: permExportCheckbox not found");
     }
     saveSettings() { 
@@ -503,7 +503,7 @@ class NutriSoft {
         this.settings.autoSaveIntervalMinutes = Number(autoSaveIntervalInput?.value) || this.settings.autoSaveIntervalMinutes || 5;
         this.settings.autoSaveEnabled = autoSaveCheckbox?.checked ?? false;
         this.settings.autoExportEnabled = autoExportCheckbox?.checked ?? false;
-        this.settings.accessLevel = accessLevelSelect?.value ?? this.settings.accessLevel ?? 'basic';
+        this.settings.accessLevel = accessLevelSelect?.value ?? this.settings.accessLevel ?? 'admin';
         this.settings.permissions = this.settings.permissions || {}; 
         this.settings.permissions.exportData = permExportCheckbox?.checked ?? false;
 
@@ -521,7 +521,7 @@ class NutriSoft {
         this.checkAccessPermissions();
     }
     checkAccessPermissions() { 
-        const currentAccessLevel = this.settings.accessLevel || 'basic';
+        const currentAccessLevel = this.settings.accessLevel || 'admin';
         const permissions = this.settings.permissions || {};
         const isAdmin = currentAccessLevel === 'admin';
         const isPrescriber = currentAccessLevel === 'prescriber';
@@ -538,7 +538,7 @@ class NutriSoft {
         const auditLogViewBtn = document.getElementById('view-audit-logs-btn'); 
 
         settingsNavBtn?.classList.toggle('hidden', !isAdmin);
-        solutionsNavBtn?.classList.toggle('hidden', !isAdmin);
+        solutionsNavBtn?.classList.remove('hidden');
 
         if (exportDataBtn) exportDataBtn.disabled = !(isAdmin || (isPrescriber && permissions.exportData));
         if (exportSettingsBtn) exportSettingsBtn.disabled = !isAdmin;
