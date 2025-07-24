@@ -17,28 +17,94 @@
       <input type="file" id="fileImport" class="hidden" />
     </div>
   </header>
-  <div id="modalForm" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
-    <div class="bg-white p-6 rounded shadow-lg w-full max-w-md">
-      <h2 class="text-xl font-semibold mb-4">Nova/Editar NC</h2>
-      <input id="inputOrigem" type="text" placeholder="Origem" class="w-full mb-2 p-2 border rounded" />
-      <textarea id="inputDescricao" placeholder="Descrição" class="w-full mb-4 p-2 border rounded"></textarea>
-      <button id="btnGuardar" class="px-4 py-2 bg-blue-500 text-white rounded">Guardar</button>
-      <button id="btnFecharModal" class="ml-2 px-4 py-2 bg-gray-300 rounded">Cancelar</button>
+  <div id="modalForm" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center overflow-auto">
+    <div class="bg-white p-6 rounded shadow-lg w-full max-w-2xl max-h-screen overflow-y-auto">
+      <h2 class="text-xl font-semibold mb-4">Nova/Editar Registo</h2>
+      <div class="mb-2">
+        <label class="block text-sm font-medium">Número</label>
+        <input id="inputNumero" type="text" class="w-full p-2 border rounded" />
+      </div>
+      <div class="mb-2">
+        <label class="block text-sm font-medium">Origem</label>
+        <select id="inputOrigem" multiple class="w-full p-2 border rounded">
+          <option value="Processo">Processo</option>
+          <option value="Reclamação de Cliente">Reclamação de Cliente</option>
+          <option value="Auditoria Externa">Auditoria Externa</option>
+          <option value="Sugestão de Cliente">Sugestão de Cliente</option>
+          <option value="Sugestão de Colaborador">Sugestão de Colaborador</option>
+          <option value="Outra">Outra</option>
+        </select>
+      </div>
+      <div class="mb-2">
+        <label class="block text-sm font-medium">Descrição</label>
+        <textarea id="inputDescricao" class="w-full p-2 border rounded"></textarea>
+      </div>
+      <div class="mb-2">
+        <label class="block text-sm font-medium">Rubrica Registo</label>
+        <input id="inputRubricaRegisto" type="text" class="w-full p-2 border rounded" />
+      </div>
+      <div class="mb-2">
+        <label class="block text-sm font-medium">Análise da Causa</label>
+        <textarea id="inputAnaliseCausa" class="w-full p-2 border rounded"></textarea>
+      </div>
+      <div class="mb-2">
+        <label class="block text-sm font-medium">Correção</label>
+        <textarea id="inputCorrecao" class="w-full p-2 border rounded"></textarea>
+      </div>
+      <div class="mb-2">
+        <label class="block text-sm font-medium">Ação Corretiva</label>
+        <textarea id="inputAcaoCorretiva" class="w-full p-2 border rounded"></textarea>
+      </div>
+      <div class="mb-2">
+        <label class="block text-sm font-medium">Acompanhamento</label>
+        <textarea id="inputAcompanhamento" class="w-full p-2 border rounded" placeholder="Ex: 2023-01-01 - descrição - rubrica"></textarea>
+      </div>
+      <div class="mb-2">
+        <label class="block text-sm font-medium">Avaliação da Eficácia</label>
+        <textarea id="inputAvaliacao" class="w-full p-2 border rounded"></textarea>
+      </div>
+      <div class="mb-2 flex items-center">
+        <input id="inputNcEncerrada" type="checkbox" class="mr-2" />
+        <label for="inputNcEncerrada" class="text-sm font-medium">NCRO Encerrado</label>
+      </div>
+      <div class="mb-2">
+        <label class="block text-sm font-medium">Rubrica Encerramento</label>
+        <input id="inputRubricaEnc" type="text" class="w-full p-2 border rounded" />
+      </div>
+      <div class="mb-4">
+        <label class="block text-sm font-medium">Data Encerramento</label>
+        <input id="inputDataEnc" type="date" class="w-full p-2 border rounded" />
+      </div>
+      <div class="flex justify-end">
+        <button id="btnGuardar" class="px-4 py-2 bg-blue-500 text-white rounded">Guardar</button>
+        <button id="btnFecharModal" class="ml-2 px-4 py-2 bg-gray-300 rounded">Cancelar</button>
+      </div>
     </div>
   </div>
   <section>
-    <div class="flex mb-4">
-      <select id="filterEstado" class="mr-2 p-2 border rounded">
-        <option value="Todas">Todas</option>
+    <div class="flex flex-wrap gap-2 mb-4">
+      <select id="filterEstado" class="p-2 border rounded">
+        <option value="">Todos os Estados</option>
         <option value="Aberta">Aberta</option>
         <option value="Fechada">Fechada</option>
       </select>
+      <select id="filterOrigem" class="p-2 border rounded">
+        <option value="">Todas as Origens</option>
+        <option value="Processo">Processo</option>
+        <option value="Reclamação de Cliente">Reclamação de Cliente</option>
+        <option value="Auditoria Externa">Auditoria Externa</option>
+        <option value="Sugestão de Cliente">Sugestão de Cliente</option>
+        <option value="Sugestão de Colaborador">Sugestão de Colaborador</option>
+        <option value="Outra">Outra</option>
+      </select>
+      <input type="date" id="filterDataInicio" class="p-2 border rounded" />
+      <input type="date" id="filterDataFim" class="p-2 border rounded" />
       <input id="filterTexto" type="text" placeholder="Pesquisar..." class="p-2 border rounded flex-grow" />
     </div>
     <table class="min-w-full bg-white shadow rounded">
       <thead>
         <tr class="bg-gray-200">
-          <th class="p-2">ID</th>
+          <th class="p-2">Número</th>
           <th class="p-2">Origem</th>
           <th class="p-2">Descrição</th>
           <th class="p-2">Data Registo</th>

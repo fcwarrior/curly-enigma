@@ -12,26 +12,45 @@
     localStorage.setItem(STORAGE_KEY, JSON.stringify(ncList));
   }
 
+  function gerarNumero() {
+    const ano = new Date().getFullYear();
+    const max = ncList.reduce((acc, n) => {
+      const m = /^\d+/.exec(n.numero);
+      const num = m ? parseInt(m[0], 10) : 0;
+      return Math.max(acc, num);
+    }, 0);
+    return `${max + 1}/${ano}`;
+  }
+
   function renderTabela() {
     const tbody = document.getElementById('tbodyNC');
     tbody.innerHTML = '';
     const estadoFiltro = document.getElementById('filterEstado').value;
+    const origemFiltro = document.getElementById('filterOrigem').value;
     const termo = document.getElementById('filterTexto').value.toLowerCase();
+    const dataInicio = document.getElementById('filterDataInicio').value;
+    const dataFim = document.getElementById('filterDataFim').value;
+
     const filtradas = ncList.filter(nc => {
-      return (estadoFiltro === 'Todas' || nc.estado === estadoFiltro) &&
-             (nc.origem.toLowerCase().includes(termo) || nc.descricao.toLowerCase().includes(termo));
+      const data = new Date(nc.dataRegisto);
+      return (!estadoFiltro || nc.estado === estadoFiltro) &&
+             (!origemFiltro || nc.origens.includes(origemFiltro)) &&
+             (!dataInicio || data >= new Date(dataInicio)) &&
+             (!dataFim || data <= new Date(dataFim)) &&
+             (nc.origens.join(' ').toLowerCase().includes(termo) || nc.descricao.toLowerCase().includes(termo));
     });
     filtradas.sort((a,b) => new Date(b.dataRegisto) - new Date(a.dataRegisto));
     filtradas.forEach(nc => {
       const tr = document.createElement('tr');
       tr.innerHTML = `
-        <td class="p-2">${nc.id}</td>
-        <td class="p-2">${nc.origem}</td>
+        <td class="p-2">${nc.numero}</td>
+        <td class="p-2">${nc.origens.join(', ')}</td>
         <td class="p-2">${nc.descricao}</td>
         <td class="p-2">${new Date(nc.dataRegisto).toLocaleDateString()}</td>
         <td class="p-2">${nc.estado}</td>
         <td class="p-2">
-          ${nc.estado === 'Aberta' ? `<button data-id="${nc.id}" class="editar text-blue-500 mr-2">Editar</button><button data-id="${nc.id}" class="fechar text-green-600">Fechar</button>` : ''}
+          <button data-id="${nc.id}" class="editar text-blue-500 mr-2">Editar</button>
+          ${nc.estado === 'Aberta' ? `<button data-id="${nc.id}" class="fechar text-green-600">Fechar</button>` : ''}
         </td>`;
       tbody.appendChild(tr);
     });
@@ -40,8 +59,25 @@
 
   function abrirModal(nc) {
     document.getElementById('modalForm').classList.remove('hidden');
-    document.getElementById('inputOrigem').value = nc ? nc.origem : '';
+    document.getElementById('inputNumero').value = nc ? nc.numero : gerarNumero();
+    const origemSelect = document.getElementById('inputOrigem');
+    Array.from(origemSelect.options).forEach(opt => opt.selected = false);
+    if (nc && nc.origens) {
+      nc.origens.forEach(o => {
+        const option = Array.from(origemSelect.options).find(op => op.value === o);
+        if (option) option.selected = true;
+      });
+    }
     document.getElementById('inputDescricao').value = nc ? nc.descricao : '';
+    document.getElementById('inputRubricaRegisto').value = nc ? nc.rubricaRegisto || '' : '';
+    document.getElementById('inputAnaliseCausa').value = nc ? nc.analiseCausa || '' : '';
+    document.getElementById('inputCorrecao').value = nc ? nc.correcao || '' : '';
+    document.getElementById('inputAcaoCorretiva').value = nc ? nc.acaoCorretiva || '' : '';
+    document.getElementById('inputAcompanhamento').value = nc ? nc.acompanhamento || '' : '';
+    document.getElementById('inputAvaliacao').value = nc ? nc.avaliacao || '' : '';
+    document.getElementById('inputNcEncerrada').checked = nc ? (nc.encerramento && nc.encerramento.ncroEncerrado) : false;
+    document.getElementById('inputRubricaEnc').value = nc && nc.encerramento ? nc.encerramento.rubrica || '' : '';
+    document.getElementById('inputDataEnc').value = nc && nc.encerramento ? (nc.encerramento.data || '') : '';
     editId = nc ? nc.id : null;
   }
 
@@ -50,22 +86,56 @@
   }
 
   function adicionarOuEditar() {
-    const origem = document.getElementById('inputOrigem').value.trim();
+    const numero = document.getElementById('inputNumero').value.trim();
+    const origemSelect = document.getElementById('inputOrigem');
+    const origens = Array.from(origemSelect.selectedOptions).map(o => o.value);
     const descricao = document.getElementById('inputDescricao').value.trim();
-    if (!origem || !descricao) return;
+    const rubricaRegisto = document.getElementById('inputRubricaRegisto').value.trim();
+    if (!numero || origens.length === 0 || !descricao || !rubricaRegisto) {
+      alert('Preencha os campos obrigatórios');
+      return;
+    }
+    const analiseCausa = document.getElementById('inputAnaliseCausa').value.trim();
+    const correcao = document.getElementById('inputCorrecao').value.trim();
+    const acaoCorretiva = document.getElementById('inputAcaoCorretiva').value.trim();
+    const acompanhamento = document.getElementById('inputAcompanhamento').value.trim();
+    const avaliacao = document.getElementById('inputAvaliacao').value.trim();
+    const enc = {
+      ncroEncerrado: document.getElementById('inputNcEncerrada').checked,
+      rubrica: document.getElementById('inputRubricaEnc').value.trim(),
+      data: document.getElementById('inputDataEnc').value
+    };
+
     if (editId) {
-      const nc = ncList.find(n => n.id === editId && n.estado === 'Aberta');
+      const nc = ncList.find(n => n.id === editId);
       if (nc) {
-        nc.origem = origem;
+        nc.numero = numero;
+        nc.origens = origens;
         nc.descricao = descricao;
+        nc.rubricaRegisto = rubricaRegisto;
+        nc.analiseCausa = analiseCausa;
+        nc.correcao = correcao;
+        nc.acaoCorretiva = acaoCorretiva;
+        nc.acompanhamento = acompanhamento;
+        nc.avaliacao = avaliacao;
+        nc.encerramento = enc;
+        nc.estado = enc.ncroEncerrado ? 'Fechada' : 'Aberta';
       }
     } else {
       const novo = {
         id: 'nc-' + Date.now(),
-        origem,
+        numero,
+        origens,
         descricao,
         dataRegisto: new Date().toISOString(),
-        estado: 'Aberta'
+        rubricaRegisto,
+        analiseCausa,
+        correcao,
+        acaoCorretiva,
+        acompanhamento,
+        avaliacao,
+        encerramento: enc,
+        estado: enc.ncroEncerrado ? 'Fechada' : 'Aberta'
       };
       ncList.push(novo);
     }
@@ -78,7 +148,7 @@
     const nc = ncList.find(n => n.id === id && n.estado === 'Aberta');
     if (nc) {
       nc.estado = 'Fechada';
-      nc.dataFecho = new Date().toISOString();
+      nc.encerramento = { ncroEncerrado: true, rubrica: '', data: new Date().toISOString() };
       salvarNC();
       renderTabela();
     }
@@ -121,6 +191,9 @@
     e.target.value = '';
   });
   document.getElementById('filterEstado').addEventListener('change', renderTabela);
+  document.getElementById('filterOrigem').addEventListener('change', renderTabela);
+  document.getElementById('filterDataInicio').addEventListener('change', renderTabela);
+  document.getElementById('filterDataFim').addEventListener('change', renderTabela);
   document.getElementById('filterTexto').addEventListener('input', renderTabela);
   document.getElementById('tbodyNC').addEventListener('click', e => {
     const id = e.target.dataset.id;
