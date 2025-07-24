@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Gestão de Não Conformidades</title>
+  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="bg-gray-100 p-6">
+  <header class="flex justify-between items-center mb-4">
+    <h1 class="text-2xl font-bold">Gestão de Não Conformidades</h1>
+    <div>
+      <button id="btnNovaNC" class="px-4 py-2 bg-blue-500 text-white rounded mr-2">Nova NC</button>
+      <button id="btnExportar" class="px-4 py-2 bg-green-500 text-white rounded mr-2">Exportar JSON</button>
+      <button id="btnImportar" class="px-4 py-2 bg-yellow-500 text-white rounded">Importar JSON</button>
+      <input type="file" id="fileImport" class="hidden" />
+    </div>
+  </header>
+  <div id="modalForm" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
+    <div class="bg-white p-6 rounded shadow-lg w-full max-w-md">
+      <h2 class="text-xl font-semibold mb-4">Nova/Editar NC</h2>
+      <input id="inputOrigem" type="text" placeholder="Origem" class="w-full mb-2 p-2 border rounded" />
+      <textarea id="inputDescricao" placeholder="Descrição" class="w-full mb-4 p-2 border rounded"></textarea>
+      <button id="btnGuardar" class="px-4 py-2 bg-blue-500 text-white rounded">Guardar</button>
+      <button id="btnFecharModal" class="ml-2 px-4 py-2 bg-gray-300 rounded">Cancelar</button>
+    </div>
+  </div>
+  <section>
+    <div class="flex mb-4">
+      <select id="filterEstado" class="mr-2 p-2 border rounded">
+        <option value="Todas">Todas</option>
+        <option value="Aberta">Aberta</option>
+        <option value="Fechada">Fechada</option>
+      </select>
+      <input id="filterTexto" type="text" placeholder="Pesquisar..." class="p-2 border rounded flex-grow" />
+    </div>
+    <table class="min-w-full bg-white shadow rounded">
+      <thead>
+        <tr class="bg-gray-200">
+          <th class="p-2">ID</th>
+          <th class="p-2">Origem</th>
+          <th class="p-2">Descrição</th>
+          <th class="p-2">Data Registo</th>
+          <th class="p-2">Estado</th>
+          <th class="p-2">Ações</th>
+        </tr>
+      </thead>
+      <tbody id="tbodyNC"></tbody>
+    </table>
+  </section>
+  <footer class="mt-4">
+    <span id="statsNC"></span>
+  </footer>
+  <script src="app.js"></script>
+</body>
+</html>

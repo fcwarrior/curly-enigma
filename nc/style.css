@@ -1,0 +1,3 @@
+/* Estilos adicionais para a aplicação de NC */
+body { font-family: Arial, sans-serif; }
+#modalForm input, #modalForm textarea { width: 100%; }
