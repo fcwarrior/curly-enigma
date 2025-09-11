@@ -43,7 +43,7 @@
 <body class="bg-gray-100">
     <!-- Header section -->
     <header class="bg-blue-800 text-white py-4 shadow-lg sticky top-0 z-40">
-        <div class="container mx-auto px-4">
+        <div class="container mx-auto px-4 max-w-5xl">
             <div class="flex flex-wrap items-center justify-between gap-4">
                 <!-- Logo and Application Title -->
                 <div class="flex items-center">
@@ -99,7 +99,7 @@
     </header>
 
     <!-- Main content container -->
-    <main class="container mx-auto px-4 py-8">
+    <main class="container mx-auto px-4 py-8 max-w-5xl">
 
         <!-- Patients Section -->
         <section id="patients-section" class="section bg-white rounded-lg shadow-md p-6 mb-8">
@@ -217,6 +217,12 @@
                                 <option value="peripheral">Periférica</option>
                             </select>
                              <p id="administration-route-error" class="error-message hidden text-sm" aria-live="polite"></p>
+                        </div>
+                        <div class="form-group">
+                            <label for="prescription-protocol" class="block text-sm font-medium text-gray-700">Protocolo</label>
+                            <select id="prescription-protocol" class="input-field mt-1 w-full" title="Selecione protocolo (opcional)">
+                                <option value="">Nenhum</option>
+                            </select>
                         </div>
                     </div>
                 </fieldset>

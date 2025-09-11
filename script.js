@@ -114,9 +114,45 @@ class DataManager {
             autoSaveEnabled: false,
             autoExportEnabled: false,
             autoSaveIntervalMinutes: 5,
-            accessLevel: 'basic',
-            permissions: { exportData: false },
-            osmolarityLimits: { peripheral: 900, central: 1500 }
+            accessLevel: 'admin',
+            permissions: { exportData: true },
+            osmolarityLimits: { peripheral: 900, central: 1500 },
+            patientCategories: [
+                {
+                    id: 'cat-adult',
+                    name: 'Adulto',
+                    ageStart: 18,
+                    ageEnd: 99,
+                    substanceLimits: {
+                        nitrogen: { softUpper: 2, hardUpper: 2.5, unit: 'g/kg' },
+                        glucose_GIR: { softUpper: 5, hardUpper: 7, unit: 'mg/kg/min' },
+                        calcium: { hardUpper: 0.2, unit: 'mEq/kg' }
+                    }
+                }
+            ],
+            protocols: [
+                {
+                    id: 'proto-adult-standard',
+                    name: 'Adulto - Protocolo Padrão',
+                    patientCategoryId: 'cat-adult',
+                    dailyTemplates: [
+                        {
+                            day: 1,
+                            inputs: {
+                                nitrogen: 8,
+                                glucose: 150,
+                                lipids: 70,
+                                sodium: 80,
+                                potassium: 60,
+                                calcium: 9.3,
+                                magnesium: 16,
+                                phosphorus: 20,
+                                traceElements: 10
+                            }
+                        }
+                    ]
+                }
+            ]
         };
         const savedSettings = this.getData(this.settingsKey);
         return {
@@ -451,7 +487,7 @@ class NutriSoft {
         if (autoSaveIntervalInput) autoSaveIntervalInput.value = settings.autoSaveIntervalMinutes ?? 5; else console.warn("loadSettings: autoSaveIntervalInput not found");
         if (autoSaveCheckbox) autoSaveCheckbox.checked = settings.autoSaveEnabled ?? false; else console.warn("loadSettings: autoSaveCheckbox not found");
         if (autoExportCheckbox) autoExportCheckbox.checked = settings.autoExportEnabled ?? false; else console.warn("loadSettings: autoExportCheckbox not found");
-        if (accessLevelSelect) accessLevelSelect.value = settings.accessLevel ?? 'basic'; else console.warn("loadSettings: accessLevelSelect not found");
+        if (accessLevelSelect) accessLevelSelect.value = settings.accessLevel ?? 'admin'; else console.warn("loadSettings: accessLevelSelect not found");
         if (permExportCheckbox) permExportCheckbox.checked = settings.permissions?.exportData ?? false; else console.warn("loadSettings: permExportCheckbox not found");
     }
     saveSettings() { 
@@ -467,7 +503,7 @@ class NutriSoft {
         this.settings.autoSaveIntervalMinutes = Number(autoSaveIntervalInput?.value) || this.settings.autoSaveIntervalMinutes || 5;
         this.settings.autoSaveEnabled = autoSaveCheckbox?.checked ?? false;
         this.settings.autoExportEnabled = autoExportCheckbox?.checked ?? false;
-        this.settings.accessLevel = accessLevelSelect?.value ?? this.settings.accessLevel ?? 'basic';
+        this.settings.accessLevel = accessLevelSelect?.value ?? this.settings.accessLevel ?? 'admin';
         this.settings.permissions = this.settings.permissions || {}; 
         this.settings.permissions.exportData = permExportCheckbox?.checked ?? false;
 
@@ -485,7 +521,7 @@ class NutriSoft {
         this.checkAccessPermissions();
     }
     checkAccessPermissions() { 
-        const currentAccessLevel = this.settings.accessLevel || 'basic';
+        const currentAccessLevel = this.settings.accessLevel || 'admin';
         const permissions = this.settings.permissions || {};
         const isAdmin = currentAccessLevel === 'admin';
         const isPrescriber = currentAccessLevel === 'prescriber';
@@ -502,7 +538,7 @@ class NutriSoft {
         const auditLogViewBtn = document.getElementById('view-audit-logs-btn'); 
 
         settingsNavBtn?.classList.toggle('hidden', !isAdmin);
-        solutionsNavBtn?.classList.toggle('hidden', !isAdmin);
+        solutionsNavBtn?.classList.remove('hidden');
 
         if (exportDataBtn) exportDataBtn.disabled = !(isAdmin || (isPrescriber && permissions.exportData));
         if (exportSettingsBtn) exportSettingsBtn.disabled = !isAdmin;
@@ -577,6 +613,10 @@ class NutriSoft {
         document.getElementById('cancel-solution-btn')?.addEventListener('click', () => this.clearSolutionForm(true)); 
         document.getElementById('solution-type')?.addEventListener('change', (event) => {
             this.updateSolutionFormFieldsVisibility(event.target.value);
+        });
+
+        document.getElementById('prescription-protocol')?.addEventListener('change', (e) => {
+            this.applyProtocol(e.target.value);
         });
 
         const evolutionPatientSelect = document.getElementById('evolution-patient-select');
@@ -838,8 +878,9 @@ class NutriSoft {
     }
     renderUIAllSections() { 
         console.log("NutriSoft.renderUIAllSections: Rendering all dynamic UI content...");
-        this.renderPatients(); 
-        this.renderPatientsList(); 
+        this.renderPatients();
+        this.renderProtocolOptions();
+        this.renderPatientsList();
         this.renderPrescriptionHistory();
         this.renderReports();
         this.renderPerformanceStats();
@@ -1002,7 +1043,46 @@ class NutriSoft {
                 <button data-action="delete" data-id="${patient.id}" class="table-action-btn text-red-600 hover:text-red-800 focus:outline-none focus:ring-2 focus:ring-red-500" title="Eliminar Doente"><i class="fas fa-trash"></i></button>
             `;
         });
-        this.checkAccessPermissions(); 
+        this.checkAccessPermissions();
+    }
+
+    renderProtocolOptions() {
+        const select = document.getElementById('prescription-protocol');
+        if (!select) {
+            console.warn("renderProtocolOptions: select not found.");
+            return;
+        }
+        const currentVal = select.value;
+        select.innerHTML = '<option value="">Nenhum</option>';
+        (this.settings.protocols || []).forEach(proto => {
+            const opt = document.createElement('option');
+            opt.value = proto.id;
+            opt.textContent = proto.name;
+            if (proto.id === currentVal) opt.selected = true;
+            select.appendChild(opt);
+        });
+    }
+
+    applyProtocol(protocolId) {
+        if (!protocolId) return;
+        const protocol = (this.settings.protocols || []).find(p => p.id === protocolId);
+        if (!protocol) return;
+        const template = protocol.dailyTemplates?.[0];
+        if (!template?.inputs) return;
+        const patient = this.getSelectedPatient();
+        const weight = patient?.weight || 0;
+        const inputs = template.inputs;
+        if (inputs.nitrogen) this.setInputValue('nitrogen-admin', inputs.nitrogen);
+        if (inputs.glucose) this.setInputValue('glucose-admin', inputs.glucose);
+        if (inputs.lipids) this.setInputValue('lipid-admin', inputs.lipids);
+        if (weight > 0) {
+            if (inputs.sodium) this.setInputValue('sodium-needs', (inputs.sodium / weight).toFixed(2));
+            if (inputs.potassium) this.setInputValue('potassium-needs', (inputs.potassium / weight).toFixed(2));
+            if (inputs.magnesium) this.setInputValue('magnesium-needs', (inputs.magnesium / weight).toFixed(2));
+            if (inputs.calcium) this.setInputValue('calcium-needs', (inputs.calcium / weight).toFixed(2));
+        }
+        if (inputs.phosphorus) this.setInputValue('phosphorus-needs', inputs.phosphorus);
+        if (inputs.traceElements) this.setInputValue('oligoelements-volume', inputs.traceElements);
     }
     renderPatientEvolution(patientId) { 
          const tbody = document.getElementById('patient-evolution-history');
@@ -1604,14 +1684,17 @@ class NutriSoft {
             const phosSol = this.solutions['GLICEROFOSFATO SÓDIO'];
             const extraNa = phos.volume * (phosSol.sodium_concentration / 1000);
             electrolytes['sodium'] = electrolytes['sodium'] || { required: 0, solution: document.getElementById('nacl-solution')?.value || '', volume: 0, error: null };
-            electrolytes['sodium'].required += extraNa;
             electrolytes['sodium'].fromPhosphorus = (electrolytes['sodium'].fromPhosphorus || 0) + extraNa;
+            electrolytes['sodium'].required = Math.max(0, (electrolytes['sodium'].required || 0) - extraNa);
+        }
+        if (electrolytes['sodium']) {
+            electrolytes['sodium'].displayRequired = (electrolytes['sodium'].required || 0) + (electrolytes['sodium'].fromPhosphorus || 0);
         }
 
         return electrolytes;
     }
 
-    calculateAdditives(patient, formulationData, totalVolumePrescribed) { 
+    calculateAdditives(patient, formulationData, totalVolumePrescribed) {
         const additives = {};
         const patientWeight = patient?.weight ?? 0;
         const glucoseRequired_g = formulationData?.glucose?.required ?? 0;
@@ -1688,6 +1771,21 @@ class NutriSoft {
             };
         });
         return additives;
+    }
+
+    verifyComponentTotals(formulation, tolerance = 1) {
+        let total = (formulation.proteins?.volume || 0) +
+                    (formulation.glutamine?.volume || 0) +
+                    (formulation.glucose?.volume || 0) +
+                    (formulation.lipids?.volume || 0) +
+                    (formulation.water?.volume || 0);
+        Object.values(formulation.electrolytes || {}).forEach(el => total += (el?.volume || 0));
+        Object.values(formulation.additives || {}).forEach(ad => total += (ad?.volume || 0));
+        const diff = Math.abs(total - (formulation.volume || 0));
+        if (diff > tolerance) {
+            formulation.warnings.push(`Soma dos volumes (${total.toFixed(1)} mL) difere do volume total (${(formulation.volume || 0).toFixed(1)} mL) em ${diff.toFixed(1)} mL.`);
+        }
+        return diff;
     }
     getDefaultAdditiveSolution(additiveTypeKey, patient) { 
         const weight = patient?.weight ?? 0;
@@ -1871,8 +1969,10 @@ class NutriSoft {
         }
 
         try {
+            const protocolId = document.getElementById('prescription-protocol')?.value || '';
             const formulation = {
-                patient: patient, 
+                patient: patient,
+                protocolId: protocolId,
                 volume: totalVolume, // Prescribed total volume
                 route: administrationRoute,
                 proteins: this.calculateProteins(patient),
@@ -1910,9 +2010,10 @@ class NutriSoft {
             if (waterVolumeNeeded < 0) {
                 // Using the error message specified in the prompt
                 formulation.errors.push(`Volume total excedido! Componentes: ${calculatedVolumeSum.toFixed(1)}mL (Limite: ${formulation.volume}mL).`);
-                // The original code also had a warning, but the prompt's snippet only specified this error.
                 // Water volume is already set to Math.max(0, waterVolumeNeeded), so it will be 0 if negative.
             }
+
+            this.verifyComponentTotals(formulation);
 
             [formulation.proteins, formulation.glutamine, formulation.glucose, formulation.lipids, ...Object.values(formulation.electrolytes ?? {}), ...Object.values(formulation.additives ?? {})].forEach(comp => {
                 if (comp?.error) formulation.errors.push(comp.error);
@@ -1977,16 +2078,17 @@ class NutriSoft {
         return `${Number(value).toFixed(decimalPlaces)} ${unit}`;
     }
     formatCompositionDetails(formulation) { 
-         const listItem = (label, component, valueKey = 'volume', unit = 'ml', dp = 2) => {
-             if (!component || component[valueKey] === undefined || component[valueKey] === null) return '';
-             const value = component[valueKey];
-             const solution = component.solution ? `(${component.solution})` : '';
-             const errorMark = component.error ? ` <i class="fas fa-exclamation-triangle text-red-500" title="${component.error}"></i>` : '';
-             const recommended = component.recommended && valueKey !== 'volume' ? component.recommended : null;
-             const recommendedText = (recommended !== null && value !== recommended) ? ` [alvo ${this.formatValue(recommended, unit, dp)}]` : '';
-             const extra = component.fromPhosphorus && label.startsWith('Sódio') ? ` (incl. ${this.formatValue(component.fromPhosphorus, 'mEq', dp)} do Fosfato)` : '';
-             return `<li>${label}: ${this.formatValue(value, unit, dp)}${recommendedText}${extra} ${solution}${errorMark}</li>`;
-         };
+        const listItem = (label, component, valueKey = 'volume', unit = 'ml', dp = 2) => {
+            if (!component || component[valueKey] === undefined || component[valueKey] === null) return '';
+            const value = component[valueKey];
+            const solution = component.solution ? `(${component.solution})` : '';
+            const errorMark = component.error ? ` <i class="fas fa-exclamation-triangle text-red-500" title="${component.error}"></i>` : '';
+            const recommended = component.recommended && valueKey !== 'volume' ? component.recommended : null;
+            const recommendedText = (recommended !== null && value !== recommended) ? ` [alvo ${this.formatValue(recommended, unit, dp)}]` : '';
+            const extra = component.fromPhosphorus && label.startsWith('Sódio') ? ` (incl. ${this.formatValue(component.fromPhosphorus, 'mEq', dp)} do Fosfato)` : '';
+            return `<li>${label}: ${this.formatValue(value, unit, dp)}${recommendedText}${extra} ${solution}${errorMark}</li>`;
+        };
+        const sodium = formulation.electrolytes?.sodium;
         return `
             <h4 class="text-md font-semibold mb-2">Componentes (Volume Total: ${this.formatValue(formulation.volume, 'ml', 0)}):</h4>
             <ul class="list-disc pl-5 space-y-1 text-sm">
@@ -1999,8 +2101,9 @@ class NutriSoft {
                 ${listItem('Lipídios', formulation.lipids, 'required', 'g')}
                 ${listItem('  ↳ Volume Lipídios', formulation.lipids, 'volume', 'ml')}
                 <br/>
-                ${listItem('Sódio', formulation.electrolytes?.sodium, 'required', 'mEq')}
-                ${listItem('  ↳ Volume NaCl', formulation.electrolytes?.sodium, 'volume', 'ml')}
+                ${listItem('Sódio (Total)', sodium, 'displayRequired', 'mEq')}
+                ${sodium?.fromPhosphorus ? `<li class="ml-5">↳ ${this.formatValue(sodium.fromPhosphorus, 'mEq', 2)} do Fosfato</li>` : ''}
+                ${listItem('  ↳ Volume NaCl', sodium, 'volume', 'ml')}
                 ${listItem('Potássio', formulation.electrolytes?.potassium, 'required', 'mEq')}
                 ${listItem('  ↳ Volume KCl', formulation.electrolytes?.potassium, 'volume', 'ml')}
                 ${listItem('Magnésio', formulation.electrolytes?.magnesium, 'required', 'mEq')}
@@ -2170,9 +2273,10 @@ class NutriSoft {
 
         const preparation = {
             preparationNumber: existingPrescription ? existingPrescription.preparationNumber : this.dataManager.getNextPreparationNumber(),
-            patientId: formulation.patient.id, 
-            patientName: formulation.patient.name, 
-            date: new Date().toISOString().split('T')[0], 
+            patientId: formulation.patient.id,
+            patientName: formulation.patient.name,
+            protocolId: formulation.protocolId || '',
+            date: new Date().toISOString().split('T')[0],
             volume: formulation.volume,
             osmolarity: formulation.osmolarity,
             preparationMap: this.generatePreparationMap(formulation), 
@@ -2422,6 +2526,7 @@ class NutriSoft {
         this.setInputValue('cacl2-solution', formulation.electrolytes?.calcium?.solution); 
         this.setInputValue('mgso4-solution', formulation.electrolytes?.magnesium?.solution);
         this.setInputValue('phosphorus-solution', formulation.electrolytes?.phosphorus?.solution);
+        this.setInputValue('prescription-protocol', formulation.protocolId || '');
     }
     printPrescription(originalIndex = null) { 
         console.log("NutriSoft.printPrescription: Preparing to print. Original Index:", originalIndex);
@@ -2574,104 +2679,22 @@ class NutriSoft {
             }
         }
     }
-    exportPDF(formulation, preparationMap, preparationNumber, patientName, prescriptionDate) { 
+    exportPDF(formulation, preparationMap, preparationNumber, patientName, prescriptionDate) {
         try {
             if (!window.jspdf || !window.jspdf.jsPDF) {
                 console.error("jsPDF library is not loaded. Cannot generate PDF.");
                 this.dataManager.displayNotification("Erro: Biblioteca jsPDF não carregada.", "error");
                 return;
             }
+
             const { jsPDF } = window.jspdf;
             const doc = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4' });
 
-            const pageWidth = doc.internal.pageSize.getWidth();
-            const pageHeight = doc.internal.pageSize.getHeight();
-            const margin = 10;
-            const usableWidth = pageWidth - 2 * margin;
-            let y = margin;
-            const lineSpacing = 5; 
-            const sectionSpacing = 8;
+            this.generateWorksheetPage(doc, formulation, preparationMap, preparationNumber, patientName, prescriptionDate);
 
-            const addWrappedText = (text, x, currentY, options = {}) => {
-                const { fontSize = 10, fontStyle = 'normal', maxWidth = usableWidth, color = [0,0,0] } = options;
-                doc.setFontSize(fontSize);
-                doc.setFont(undefined, fontStyle);
-                doc.setTextColor(color[0], color[1], color[2]);
+            this.generateLabelsPage(doc, formulation, preparationNumber, patientName, prescriptionDate);
 
-                const lines = doc.splitTextToSize(text, maxWidth);
-                doc.text(lines, x, currentY);
-                return currentY + (lines.length * (fontSize * 0.352778 * 1.2)); 
-            };
-
-            doc.setFontSize(16); doc.setFont(undefined, 'bold');
-            doc.text('Prescrição de Nutrição Parentérica', pageWidth / 2, y, { align: 'center' });
-            y += lineSpacing * 2;
-
-            doc.setFontSize(10); doc.setFont(undefined, 'normal');
-            doc.text(`Número Preparação: ${preparationNumber}`, margin, y);
-            let displayDate = 'N/A';
-            try { displayDate = prescriptionDate ? new Date(prescriptionDate).toLocaleDateString() : new Date().toLocaleDateString(); } catch {}
-            doc.text(`Data Prescrição: ${displayDate}`, pageWidth - margin, y, { align: 'right' });
-            y += lineSpacing * 1.5;
-
-            doc.text(`Paciente: ${patientName || 'N/A'}`, margin, y);
-            doc.text(`Peso: ${formulation.patient?.weight ?? '?'} kg`, pageWidth - margin, y, { align: 'right' });
-            y += lineSpacing * 1.5;
-            doc.line(margin, y, pageWidth - margin, y); 
-            y += lineSpacing;
-
-
-            doc.setFontSize(12); doc.setFont(undefined, 'bold');
-            doc.text('Detalhes da Formulação:', margin, y);
-            y += lineSpacing;
-            const formulationDetailsText = this.formatCompositionDetailsForPDF(formulation);
-            y = addWrappedText(formulationDetailsText, margin, y, { fontSize: 9 });
-            y += sectionSpacing;
-
-            if (y > pageHeight - margin * 3) { doc.addPage(); y = margin; } 
-
-            doc.setFontSize(12); doc.setFont(undefined, 'bold');
-            doc.text('Mapa de Preparação (Ordem Sugerida):', margin, y);
-            y += lineSpacing;
-            y = addWrappedText(preparationMap, margin, y, { fontSize: 8.5, fontStyle: 'courier' }); 
-            y += sectionSpacing;
-
-            if (y > pageHeight - margin * 3) { doc.addPage(); y = margin; }
-
-            if (formulation.warnings?.length > 0) {
-                doc.setFontSize(12); doc.setFont(undefined, 'bold');
-                y = addWrappedText('Avisos da Formulação:', margin, y, { color: [255, 100, 0] }); 
-                y += lineSpacing * 0.5;
-                y = addWrappedText(formulation.warnings.map(w => `- ${w}`).join('\n'), margin, y, { fontSize: 9 });
-                y += sectionSpacing;
-                if (y > pageHeight - margin * 3) { doc.addPage(); y = margin; }
-            }
-
-            if (formulation.errors?.length > 0) {
-                doc.setFontSize(12); doc.setFont(undefined, 'bold');
-                y = addWrappedText('ERROS CRÍTICOS:', margin, y, { color: [255, 0, 0] }); 
-                y += lineSpacing * 0.5;
-                y = addWrappedText(formulation.errors.map(e => `- ${e}`).join('\n'), margin, y, { fontSize: 9 });
-                y += sectionSpacing;
-                if (y > pageHeight - margin * 3) { doc.addPage(); y = margin; }
-            }
-
-            y = Math.max(y, pageHeight - margin - 30); 
-            if (y > pageHeight - margin - 30) { 
-                 if (pageHeight - y < 30) { 
-                    doc.addPage(); y = margin;
-                 }
-            } else {
-                y = pageHeight - margin - 30; 
-            }
-
-            doc.setFontSize(10);
-            doc.text('Prescrito por: _________________________', margin, y);
-            doc.text('Conferido por (Farm.): _________________________', pageWidth / 2, y, {align: 'left'});
-            y += lineSpacing * 2;
-            doc.text(`Data Impressão: ${new Date().toLocaleString()}`, margin, y);
-
-            const filename = `Prescricao_NP_${String(preparationNumber).replace(/\W/g, '')}_${patientName.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}.pdf`;
+            const filename = `PN_${String(preparationNumber).replace(/\W/g, '')}_${patientName.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}.pdf`;
             doc.save(filename);
             console.log("PDF generated:", filename);
         } catch (error) {
@@ -2680,7 +2703,90 @@ class NutriSoft {
             AuditLogger.log('exportPDFError', { prepId: preparationNumber, error: error.message, stack: error.stack });
         }
     }
-    formatCompositionDetailsForPDF(formulation) { 
+
+    generateWorksheetPage(doc, formulation, preparationMap, prepNumber, patientName, prescriptionDate) {
+        const pageWidth = doc.internal.pageSize.getWidth();
+        const margin = 10;
+        const usableWidth = pageWidth - margin * 2;
+        let y = margin;
+        const line = (txt, offset = 0) => { doc.text(txt, margin + offset, y); y += 5; };
+
+        doc.setFontSize(14); doc.setFont(undefined, 'bold');
+        doc.text('PARENTERAL NUTRITION SOLUTION', pageWidth / 2, y, { align: 'center' });
+        y += 7;
+
+        doc.setFontSize(9); doc.setFont(undefined, 'normal');
+        let dateStr = 'N/A';
+        try { dateStr = prescriptionDate ? new Date(prescriptionDate).toLocaleDateString() : new Date().toLocaleDateString(); } catch {}
+        line(`#Prep: ${prepNumber}`);
+        line(`Data Prescrição: ${dateStr}`);
+        line(`Paciente: ${patientName}`);
+        line(`Via: ${formulation.route === 'peripheral' ? 'Periférica' : 'Central'}`);
+
+        const patient = formulation.patient || {};
+        line(`Peso: ${this.formatValue(patient.weight, 'kg', 1)}`);
+        if (patient.height) line(`Altura: ${this.formatValue(patient.height, 'cm', 0)}`);
+        if (patient.condition) line(`Condição: ${patient.condition}`);
+
+        doc.line(margin, y, margin + usableWidth, y); y += 6;
+
+        doc.setFontSize(10); doc.setFont(undefined, 'bold');
+        line('Macronutrientes e Energia');
+
+        doc.setFontSize(9); doc.setFont(undefined, 'normal');
+        const weight = patient.weight || 0;
+        const prot = formulation.proteins || {};
+        const glu = formulation.glucose || {};
+        const lip = formulation.lipids || {};
+
+        const protKg = weight > 0 ? prot.required / weight : 0;
+        const gluKg = weight > 0 ? glu.required / weight : 0;
+        const lipKg = weight > 0 ? lip.required / weight : 0;
+        const energyProt = prot.required * 4;
+        const energyGlu = glu.required * 3.4;
+        const energyLip = lip.required * 9;
+
+        line(`Aminoácidos: ${this.formatValue(prot.required, 'g', 0)} (${this.formatValue(protKg, 'g/kg', 2)})  N: ${this.formatValue(prot.nitrogen, 'g', 2)}  kcal: ${this.formatValue(energyProt, 'kcal', 0)}`);
+        line(`Glicose: ${this.formatValue(glu.required, 'g', 0)} (${this.formatValue(gluKg, 'g/kg', 2)})  kcal: ${this.formatValue(energyGlu, 'kcal', 0)}`);
+        line(`Lípidos: ${this.formatValue(lip.required, 'g', 0)} (${this.formatValue(lipKg, 'g/kg', 2)})  kcal: ${this.formatValue(energyLip, 'kcal', 0)}`);
+        const totalEnergy = energyProt + energyGlu + energyLip;
+        line(`Energia Total Estimada: ${this.formatValue(totalEnergy, 'kcal', 0)}`);
+
+        y += 2;
+        doc.setFontSize(10); doc.setFont(undefined, 'bold');
+        line('Ingredientes da Nutrição Parentérica');
+        doc.setFontSize(9); doc.setFont(undefined, 'normal');
+        const addRow = (comp, data, unit) => {
+            if (!data) return;
+            line(`${comp}: ${this.formatValue(data.required ?? data.volume, unit)} ${data.solution ? '('+data.solution+')' : ''} → ${this.formatValue(data.volume, 'ml')}`, 0);
+        };
+        addRow('Aminoácidos', prot, 'g');
+        if (formulation.glutamine?.volume > 0) addRow('Glutamina', formulation.glutamine, 'g');
+        addRow('Glucose', glu, 'g');
+        addRow('Lípidos', lip, 'g');
+        Object.entries(formulation.electrolytes || {}).forEach(([k,v])=>{ addRow(k.charAt(0).toUpperCase()+k.slice(1), v, k==='phosphorus'? 'mmol':'mEq'); });
+        Object.entries(formulation.additives || {}).forEach(([k,v])=>{ if(v.volume>0||v.required>0) addRow(k.replace(/_/g,' '), v, k==='carnitine'?'mg':(k==='insulin'||k==='heparin')?'UI':'ml'); });
+        addRow('Água Estéril', formulation.water, 'ml');
+
+        y += 2;
+        doc.setFontSize(10); doc.setFont(undefined, 'bold');
+        line('Propriedades da Administração');
+        doc.setFontSize(9); doc.setFont(undefined, 'normal');
+        line(`Volume Total: ${this.formatValue(formulation.volume, 'ml', 0)}`);
+        line(`Osmolaridade: ${this.formatValue(formulation.osmolarity, 'mOsm/L', 0)}`);
+        if (preparationMap) { y += 3; doc.setFontSize(8); line('--- Mapa de Preparação ---'); y = doc.splitTextToSize(preparationMap, usableWidth).reduce((cy,l)=>{doc.text(l, margin, cy); return cy+4;}, y); }
+
+        if (formulation.warnings?.length) {
+            y += 2; doc.setFont(undefined,'bold'); doc.setTextColor(255,100,0); line('Avisos:'); doc.setTextColor(0,0,0); doc.setFont(undefined,'normal');
+            formulation.warnings.forEach(w=>line(`- ${w}`));
+        }
+        if (formulation.errors?.length) {
+            y += 2; doc.setFont(undefined,'bold'); doc.setTextColor(255,0,0); line('Erros:'); doc.setTextColor(0,0,0); doc.setFont(undefined,'normal');
+            formulation.errors.forEach(e=>line(`- ${e}`));
+        }
+        doc.addPage();
+    }
+    formatCompositionDetailsForPDF(formulation) {
         const details = [];
         const formatLine = (label, component, valueKey = 'volume', unit = 'ml', dp = 2) => {
              if (!component || component[valueKey] === undefined || component[valueKey] === null || (component[valueKey] === 0 && (label.toLowerCase().includes('volume') || unit ==='ml'))) return null;
@@ -2713,8 +2819,12 @@ class NutriSoft {
         Object.entries(formulation.electrolytes ?? {}).forEach(([key, comp]) => {
             const name = key.charAt(0).toUpperCase() + key.slice(1);
             const unit = (key === 'phosphorus') ? 'mmol' : 'mEq';
-            const line1 = formatLine(`${name} (total)`, comp, 'required', unit);
+            const valueKey = key === 'sodium' ? 'displayRequired' : 'required';
+            const line1 = formatLine(`${name} (total)`, comp, valueKey, unit);
             if (line1) details.push(line1);
+            if (key === 'sodium' && comp.fromPhosphorus) {
+                details.push(`   ↳ ${this.formatValue(comp.fromPhosphorus, 'mEq', 2)} do Fosfato`);
+            }
             const line2 = formatLine(`  ↳ Volume ${name}`, comp, 'volume', 'ml');
             if (line2) details.push(line2);
         });
@@ -2742,23 +2852,43 @@ class NutriSoft {
 
         return details.filter(line => line !== null).join('\n');
     }
-    addLabelContent(doc, formulation, startX, startY, isLipidsLabel, preparationNumber, patientName, prescriptionDate) { 
+    generateLabelsPage(doc, formulation, prepNum, patientName, prescriptionDate) {
+        const labelWidth = 90, labelHeight = 50;
+        const marginX = 10, marginY = 10, gapX = 10, gapY = 10;
+        const isTwoBags = (formulation.patient?.weight < 5 && formulation.patient?.condition === 'pediatric') || (formulation.patient?.condition === 'neonate');
+        const labels = isTwoBags ? [false, false, true, true] : [false, false, false, false];
+        doc.addPage();
+        labels.forEach((isLipids, idx) => {
+            if (idx > 0 && idx % 4 === 0) doc.addPage();
+            const col = idx % 2;
+            const row = Math.floor((idx % 4) / 2);
+            const x = marginX + col * (labelWidth + gapX);
+            const y = marginY + row * (labelHeight + gapY);
+            this.addLabelContent(doc, formulation, x, y, isLipids, prepNum, patientName, prescriptionDate);
+        });
+    }
+    addLabelContent(doc, formulation, startX, startY, isLipidsLabel, preparationNumber, patientName, prescriptionDate) {
         const labelWidth = 90; const labelHeight = 50; const padding = 5;
         const textStartX = startX + padding;
         let currentY = startY + padding;
-        const lineSpacingLabel = 4; 
+        const lineSpacingLabel = 4;
 
-        doc.setDrawColor(0); doc.rect(startX, startY, labelWidth, labelHeight); 
+        doc.setDrawColor(0); doc.setLineWidth(0.3); doc.rect(startX, startY, labelWidth, labelHeight);
 
-        doc.setFontSize(8); doc.setFont(undefined, 'italic');
-        doc.text('<<ULSSM - SG TF>>', textStartX, currentY); currentY += lineSpacingLabel * 0.8;
+        doc.setFontSize(9); doc.setFont(undefined, 'italic');
+        doc.text('ULSSM - SG TF', textStartX, currentY); currentY += lineSpacingLabel * 0.9;
 
-        doc.setFontSize(11); doc.setFont(undefined, 'bold');
-        doc.text(`#Prep: ${preparationNumber}`, textStartX, currentY); currentY += lineSpacingLabel * 1.1;
+        doc.setFontSize(12); doc.setFont(undefined, 'bold');
+        doc.text(`#Prep: ${preparationNumber}`, textStartX, currentY); currentY += lineSpacingLabel * 1.2;
 
-        const maxNameWidthChars = 35; 
+        const maxNameWidthChars = 35;
         const displayName = patientName.length > maxNameWidthChars ? patientName.substring(0, maxNameWidthChars) + "..." : patientName;
+        doc.setFontSize(10); doc.setFont(undefined, 'bold');
         doc.text(`Paciente: ${displayName}`, textStartX, currentY); currentY += lineSpacingLabel * 1.1;
+        if (formulation.patient?.service) {
+            doc.setFontSize(8); doc.setFont(undefined, 'normal');
+            doc.text(`Serviço: ${formulation.patient.service}`, textStartX, currentY); currentY += lineSpacingLabel;
+        }
 
         doc.setFontSize(9); doc.setFont(undefined, 'bold');
         let bagType = 'BOLSA ÚNICA (3-em-1)';
@@ -2786,9 +2916,29 @@ class NutriSoft {
             const lipidVol = (formulation.lipids?.volume??0) + (formulation.additives?.fat_soluble_vitamins?.volume??0);
             bagVol = isLipidsLabel ? lipidVol : formulation.volume - lipidVol;
         }
+        doc.setFontSize(9); doc.setFont(undefined, 'normal');
         doc.text(`Volume: ${this.formatValue(bagVol, 'ml', 0)}`, textStartX, currentY); currentY += lineSpacingLabel;
         doc.text(`Validade: (Definir conforme protocolo)`, textStartX, currentY); currentY += lineSpacingLabel;
 
+        doc.setFontSize(7); doc.setFont(undefined, 'bold');
+        const col1 = textStartX, col2 = textStartX + 18, col3 = textStartX + 44, col4 = startX + labelWidth - padding;
+        doc.text('Comp', col1, currentY);
+        doc.text('Dose', col2, currentY);
+        doc.text('Solução', col3, currentY);
+        doc.text('Vol', col4, currentY, {align:'right'}); currentY += lineSpacingLabel;
+        doc.setFont(undefined,'normal');
+        const rows = [
+            ['AA', this.formatValue(formulation.proteins?.required,'g',0), formulation.proteins?.solution||'', this.formatValue(formulation.proteins?.volume,'ml',0)],
+            ['Glu', this.formatValue(formulation.glucose?.required,'g',0), formulation.glucose?.solution||'', this.formatValue(formulation.glucose?.volume,'ml',0)],
+            ['Líp', this.formatValue(formulation.lipids?.required,'g',0), formulation.lipids?.solution||'', this.formatValue(formulation.lipids?.volume,'ml',0)]
+        ];
+        rows.forEach(r=>{ 
+            doc.text(r[0], col1, currentY);
+            doc.text(r[1], col2, currentY);
+            doc.text(r[2], col3, currentY);
+            doc.text(r[3], col4, currentY, {align:'right'});
+            currentY+=lineSpacingLabel; 
+        });
 
         doc.setFontSize(7); doc.setFont(undefined, 'italic');
         doc.text('Conservar refrigerado. Proteger da luz.', textStartX, currentY);
