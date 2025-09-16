@@ -234,7 +234,13 @@
 
                 <!-- Nutritional Needs Group -->
                 <fieldset class="mb-6 p-4 bg-gray-50 rounded-md border border-gray-200">
-                    <legend class="text-lg font-semibold mb-3 text-gray-800 px-2">Necessidades Nutricionais</legend>
+                    <legend class="fieldset-legend text-lg font-semibold mb-3 text-gray-800 px-2">
+                        <span>Necessidades Nutricionais</span>
+                        <button type="button" id="suggest-needs-btn" class="btn-ghost" title="Gerar sugestões automáticas com base no perfil do doente">
+                            <i class="fas fa-magic"></i>
+                            <span>Sugerir</span>
+                        </button>
+                    </legend>
                     <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
                         <div class="form-group">
                             <label for="protein-needs" class="block text-sm font-medium text-gray-700">Proteínas (g/kg/dia) <span class="text-red-500">*</span></label>

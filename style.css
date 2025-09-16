@@ -171,6 +171,31 @@ body {
     margin-right: 0.5rem; /* mr-2 */
 }
 
+.btn-ghost {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.35rem 0.75rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: #2563eb;
+    background-color: rgba(37, 99, 235, 0.08);
+    border: 1px solid rgba(37, 99, 235, 0.25);
+    border-radius: 9999px;
+    cursor: pointer;
+    transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+}
+
+.btn-ghost:hover {
+    background-color: rgba(37, 99, 235, 0.15);
+    border-color: rgba(37, 99, 235, 0.45);
+}
+
+.btn-ghost:focus {
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.25);
+}
+
 /* --- Tables --- */
 table {
     width: 100%;
@@ -199,6 +224,80 @@ tbody tr:last-child td {
 }
 tbody tr:hover:not(.no-results-row) { /* Don't apply hover to no-results row */
     background-color: #f3f4f6; /* gray-100, slightly different from thead */
+}
+
+.summary-table,
+.component-table {
+    font-size: 0.8rem;
+    margin-bottom: 1rem;
+    border: 1px solid #e5e7eb;
+    border-radius: 0.5rem;
+    overflow: hidden;
+}
+
+.summary-table thead th,
+.component-table thead th {
+    background-color: #f3f4f6;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-size: 0.65rem;
+}
+
+.summary-table tbody th,
+.component-table tbody th {
+    text-transform: none;
+    font-weight: 600;
+    color: #111827;
+    width: 28%;
+}
+
+.summary-table td,
+.summary-table th,
+.component-table td,
+.component-table th {
+    padding: 0.6rem 0.75rem;
+}
+
+.summary-table tbody tr:nth-child(even),
+.component-table tbody tr:nth-child(even) {
+    background-color: #f9fafb;
+}
+
+.metric-card {
+    display: flex;
+    flex-direction: column;
+    padding: 0.75rem 1rem;
+    border-radius: 0.5rem;
+    background: linear-gradient(135deg, rgba(59, 130, 246, 0.08), rgba(59, 130, 246, 0.02));
+    border: 1px solid rgba(59, 130, 246, 0.15);
+}
+
+.metric-label {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #2563eb;
+    margin-bottom: 0.2rem;
+}
+
+.metric-value {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: #111827;
+}
+
+.suggested-field {
+    border-color: #2563eb !important;
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2) !important;
+    background-color: rgba(219, 234, 254, 0.6);
+}
+
+.fieldset-legend {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    width: 100%;
 }
 
 /* Table Actions */
