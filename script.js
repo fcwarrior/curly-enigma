@@ -1,6 +1,68 @@
 // --- script.js ---
 
 /**
+ * Normalizes numeric input allowing both comma and dot as decimal separators.
+ * @param {string|number|null|undefined} value
+ * @returns {string}
+ */
+function normalizeNumberString(value) {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+        return String(value);
+    }
+    if (value === null || value === undefined) {
+        return '';
+    }
+    return String(value).trim().replace(/\s+/g, '').replace(',', '.');
+}
+
+/**
+ * Parses a numeric value accepting either comma or dot decimals.
+ * Falls back to zero when parsing fails, ensuring calculations remain robust.
+ * @param {string|number|null|undefined} value
+ * @param {number} [defaultValue=0]
+ * @returns {number}
+ */
+function parseNum(value, defaultValue = 0) {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+        return value;
+    }
+    const normalized = normalizeNumberString(value);
+    if (normalized === '') {
+        return defaultValue;
+    }
+    const parsed = Number(normalized);
+    return Number.isFinite(parsed) ? parsed : defaultValue;
+}
+
+/**
+ * Determines whether a raw input string can be parsed into a finite number.
+ * @param {string|number|null|undefined} value
+ * @returns {boolean}
+ */
+function isValidNumericInput(value) {
+    const normalized = normalizeNumberString(value);
+    if (normalized === '') return false;
+    const parsed = Number(normalized);
+    return Number.isFinite(parsed);
+}
+
+/**
+ * Rounds component volumes consistently to the desired decimal places.
+ * Ensures negative and NaN values are clamped to zero.
+ * @param {number} value
+ * @param {number} [decimalPlaces=1]
+ * @returns {number}
+ */
+function roundVolume(value, decimalPlaces = 1) {
+    const parsed = parseNum(value, 0);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+        return 0;
+    }
+    const factor = Math.pow(10, decimalPlaces);
+    return Math.round(parsed * factor) / factor;
+}
+
+/**
  * Manages data persistence using localStorage.
  * Handles getting, saving, exporting, and importing application data.
  */
@@ -154,12 +216,12 @@ class DataManager {
                 }
             ]
         };
-        const savedSettings = this.getData(this.settingsKey);
+        const savedSettings = this.getData(this.settingsKey) || {};
         return {
             ...defaults,
             ...savedSettings,
-            permissions: { ...defaults.permissions, ...(savedSettings?.permissions || {}) },
-            osmolarityLimits: { ...defaults.osmolarityLimits, ...(savedSettings?.osmolarityLimits || {}) }
+            permissions: { ...defaults.permissions, ...(savedSettings.permissions || {}) },
+            osmolarityLimits: { ...defaults.osmolarityLimits, ...(savedSettings.osmolarityLimits || {}) }
         };
     }
 
@@ -1197,6 +1259,7 @@ class NutriSoft {
         } else if (section === 'prescription') {
             fieldsToValidate.push({ id: 'prescription-patient', required: true, message: 'Selecione o doente.' });
             fieldsToValidate.push({ id: 'total-volume', required: true, type: 'number', min: 1, message: 'Volume total deve ser um número válido maior que zero.' });
+            fieldsToValidate.push({ id: 'infusion-hours', required: true, type: 'number', min: 1, message: 'Horas de perfusão devem ser um número válido maior que zero.' });
             fieldsToValidate.push({ id: 'protein-needs', required: true, type: 'number', min: 0, message: 'Necessidades proteicas devem ser >= 0.' });
             fieldsToValidate.push({ id: 'lipid-needs', required: true, type: 'number', min: 0, message: 'Necessidades lipídicas devem ser >= 0.' });
             fieldsToValidate.push({ id: 'glucose-rate', required: true, type: 'number', min: 0, message: 'Taxa de glucose deve ser >= 0.' });
@@ -1233,11 +1296,11 @@ class NutriSoft {
 
             if (field.required && (value === null || value.trim() === '')) {
                 fieldIsValid = false;
-            } else if (value.trim() !== '' && field.type === 'number') { 
-                const numValue = parseFloat(value);
-                if (isNaN(numValue)) {
+            } else if (value.trim() !== '' && field.type === 'number') {
+                if (!isValidNumericInput(value)) {
                     fieldIsValid = false; currentMessage = `${inputField.labels?.[0]?.textContent || 'Campo'} deve ser um número.`;
                 } else {
+                    const numValue = parseNum(value);
                     if (field.min !== undefined && numValue < field.min) {
                         fieldIsValid = false; currentMessage = `${inputField.labels?.[0]?.textContent || 'Campo'} deve ser no mínimo ${field.min}.`;
                     }
@@ -1334,8 +1397,8 @@ class NutriSoft {
                 name: document.getElementById('patient-name').value.trim(), 
                 service: document.getElementById('patient-service')?.value.trim() || null,
                 dob: document.getElementById('patient-dob')?.value || null,
-                weight: parseFloat(document.getElementById('patient-weight').value), 
-                height: parseInt(document.getElementById('patient-height').value),   
+                weight: parseNum(document.getElementById('patient-weight').value, 0),
+                height: Math.round(parseNum(document.getElementById('patient-height').value, 0)),
                 condition: document.getElementById('patient-condition').value, 
                 createdAt: isEditing ? (this.patients.find(p => p.id === editingId)?.createdAt || new Date().toISOString()) : new Date().toISOString(),
                 updatedAt: new Date().toISOString()
@@ -1468,19 +1531,19 @@ class NutriSoft {
         if (patientIdInput) this.hideErrorMessage(patientIdInput); 
         return patient;
     }
-    getNumericInput(id, defaultValue = 0, isRequired = false) { 
-        // Note: Uses parseFloat, which expects '.' as decimal separator.
-        // Locale-specific input (e.g., using ',') may require pre-processing or a different parsing strategy.
+    getNumericInput(id, defaultValue = 0, isRequired = false) {
         const inputElement = document.getElementById(id);
         if (!inputElement) {
             return defaultValue;
         }
-        const value = inputElement.value;
-        if (value === null || value.trim() === '') {
-            return isRequired ? NaN : defaultValue; 
+        const rawValue = inputElement.value;
+        if (rawValue === null || rawValue.trim() === '') {
+            return isRequired ? NaN : defaultValue;
         }
-        const number = parseFloat(value);
-        return !isNaN(number) ? number : (isRequired ? NaN : defaultValue); 
+        if (!isValidNumericInput(rawValue)) {
+            return isRequired ? NaN : defaultValue;
+        }
+        return parseNum(rawValue, defaultValue);
     }
 
     calculateProteins(patient) {
@@ -1513,16 +1576,17 @@ class NutriSoft {
         // protein_concentration is in g/L in this.solutions
         const concentration_g_ml = aminoacidSolution.protein_concentration / 1000;
         const aminoacidVolume = concentration_g_ml > 0 ? proteinRequired / concentration_g_ml : 0;
+        const roundedAminoVolume = roundVolume(aminoacidVolume);
 
         // Calcular nitrogénio fornecido (se aplicável)
         // nitrogen_concentration is in g/L in this.solutions
         const nitrogen_g_ml = (aminoacidSolution.nitrogen_concentration ?? 0) / 1000;
-        const nitrogenFromVolume = nitrogen_g_ml * aminoacidVolume;
+        const nitrogenFromVolume = nitrogen_g_ml * roundedAminoVolume;
         if (isNaN(nitrogenAdmin) || nitrogenAdmin <= 0) {
             nitrogenProvided = nitrogenFromVolume;
         }
 
-        return { required: proteinRequired, recommended: recommendedProtein, solution: aminoacidSolutionName, volume: aminoacidVolume, nitrogen: nitrogenProvided, error: null };
+        return { required: proteinRequired, recommended: recommendedProtein, solution: aminoacidSolutionName, volume: roundedAminoVolume, nitrogen: nitrogenProvided, error: null };
     }
 
     calculateGlutamine(patient, proteinData) { 
@@ -1544,20 +1608,21 @@ class NutriSoft {
         // nitrogen_concentration is in g/L in this.solutions
         const glutamine_N_g_ml = glutamineSolution.nitrogen_concentration / 1000; 
         const glutamineVolume = glutamine_N_g_ml > 0 ? targetGlutamineNitrogenContribution / glutamine_N_g_ml : 0;
+        const roundedGlutamineVolume = roundVolume(glutamineVolume);
 
         // glutamine_concentration is in mg/mL in this.solutions
-        const glutamineProvided_g = (glutamineSolution.glutamine_concentration / 1000) * glutamineVolume; 
+        const glutamineProvided_g = (glutamineSolution.glutamine_concentration / 1000) * roundedGlutamineVolume;
 
         return {
-            required_g_dipeptide: glutamineProvided_g, 
+            required_g_dipeptide: glutamineProvided_g,
             solution: glutamineSolutionName,
-            volume: glutamineVolume,
-            nitrogen: targetGlutamineNitrogenContribution, 
+            volume: roundedGlutamineVolume,
+            nitrogen: targetGlutamineNitrogenContribution,
             error: null
         };
     }
 
-    calculateGlucose(patient) {
+    calculateGlucose(patient, infusionHours = 24) {
         const defaults = { required: 0, solution: '', volume: 0, error: null };
         if (!patient?.weight) return { ...defaults, error: "Peso do doente não disponível." };
 
@@ -1566,7 +1631,8 @@ class NutriSoft {
         if (isNaN(glucoseRate_mg_kg_min)) return { ...defaults, error: "Taxa de infusão de glucose inválida." };
 
         const glucoseAdmin = this.getNumericInput('glucose-admin', 0, true);
-        const recommendedGlucose = (glucoseRate_mg_kg_min * patient.weight * 1440) / 1000;
+        const infusionMinutes = Math.max(1, parseNum(infusionHours, 24) * 60);
+        const recommendedGlucose = (glucoseRate_mg_kg_min * patient.weight * infusionMinutes) / 1000;
         let glucoseRequired_g_day = recommendedGlucose;
         if (!isNaN(glucoseAdmin) && glucoseAdmin > 0) {
             glucoseRequired_g_day = glucoseAdmin;
@@ -1583,10 +1649,11 @@ class NutriSoft {
 
         // Calcular volume necessário (mL) → dose_total / concentração (g/L → g/mL)
         // glucose_concentration is in g/L in this.solutions
-        const concentration_g_ml = glucoseSolution.glucose_concentration / 1000; 
+        const concentration_g_ml = glucoseSolution.glucose_concentration / 1000;
         const glucoseVolume = concentration_g_ml > 0 ? glucoseRequired_g_day / concentration_g_ml : 0;
+        const roundedGlucoseVolume = roundVolume(glucoseVolume);
 
-        return { required: glucoseRequired_g_day, recommended: recommendedGlucose, solution: glucoseSolutionName, volume: glucoseVolume, error: null };
+        return { required: glucoseRequired_g_day, recommended: recommendedGlucose, solution: glucoseSolutionName, volume: roundedGlucoseVolume, error: null };
     }
 
     calculateLipids(patient) {
@@ -1615,10 +1682,11 @@ class NutriSoft {
 
         // Converter concentração para g/mL (ex: 200 mg/mL = 0.2 g/mL)
         // lipid_concentration is in mg/mL in this.solutions
-        const concentration_g_ml = lipidSolution.lipid_concentration / 1000; 
+        const concentration_g_ml = lipidSolution.lipid_concentration / 1000;
         const lipidVolume = concentration_g_ml > 0 ? lipidRequired_g / concentration_g_ml : 0;
+        const roundedLipidVolume = roundVolume(lipidVolume);
 
-        return { required: lipidRequired_g, recommended: recommendedLipids, solution: lipidSolutionName, volume: lipidVolume, error: null };
+        return { required: lipidRequired_g, recommended: recommendedLipids, solution: lipidSolutionName, volume: roundedLipidVolume, error: null };
     }
 
     calculateElectrolytes(patient) {
@@ -1671,10 +1739,11 @@ class NutriSoft {
                 }
             }
 
+            const safeVolume = (isNaN(volume) || !isFinite(volume)) ? 0 : roundVolume(volume);
             electrolytes[config.key] = {
                 required: requiredAmount,
                 solution: solutionName || '',
-                volume: (isNaN(volume) || !isFinite(volume)) ? 0 : volume,
+                volume: safeVolume,
                 error: error
             };
         });
@@ -1763,10 +1832,11 @@ class NutriSoft {
                 }
             }
 
+            const safeVolume = (isNaN(volume) || !isFinite(volume)) ? 0 : roundVolume(volume);
             additives[config.key] = {
                 required: requiredAmount,
                 solution: solutionName || '',
-                volume: (isNaN(volume) || !isFinite(volume)) ? 0 : volume,
+                volume: safeVolume,
                 error: error
             };
         });
@@ -1873,7 +1943,8 @@ class NutriSoft {
         else if (protein_g_kg > 2.5) warnings.push(`Dose de Proteínas (${protein_g_kg.toFixed(1)} g/kg) elevada. Considerar ajuste.`);
 
         const glucose_g_day = formulation.glucose?.required ?? 0;
-        const GIR_mg_kg_min = (glucose_g_day * 1000) / (weight * 1440); 
+        const infusionMinutes = Math.max(1, parseNum(formulation.infusionHours, 24) * 60);
+        const GIR_mg_kg_min = (glucose_g_day * 1000) / (weight * infusionMinutes);
         if (GIR_mg_kg_min > 14 && patient.condition !== 'pediatric' && patient.condition !== 'critical') warnings.push(`Taxa de Infusão de Glucose (GIR: ${GIR_mg_kg_min.toFixed(1)} mg/kg/min) muito elevada para adulto não crítico. Risco de hiperglicemia.`);
         else if (GIR_mg_kg_min > 7 && patient.condition !== 'pediatric' && patient.condition !== 'critical') warnings.push(`Taxa de Infusão de Glucose (GIR: ${GIR_mg_kg_min.toFixed(1)} mg/kg/min) elevada. Monitorizar glicemia.`);
 
@@ -1921,7 +1992,7 @@ class NutriSoft {
         const weight = patient.weight;
         const proteinPerKg = (formulation.proteins?.required ?? 0) / weight;
         const glucose_g_day = formulation.glucose?.required ?? 0;
-        const GIR_mg_kg_min = (glucose_g_day * 1000) / (weight * 1440);
+        const GIR_mg_kg_min = (glucose_g_day * 1000) / (weight * Math.max(1, parseNum(formulation.infusionHours, 24) * 60));
 
         if (patient.condition === 'renal') {
             if (proteinPerKg > 1.2) warnings.push(`Diretriz Renal: Dose de proteínas (${proteinPerKg.toFixed(1)} g/kg) pode necessitar de ajuste em insuficiência renal não dialítica.`);
@@ -1956,7 +2027,9 @@ class NutriSoft {
         }
 
         const totalVolumeInput = document.getElementById('total-volume');
-        const totalVolume = this.getNumericInput('total-volume', 0, true); 
+        const totalVolume = this.getNumericInput('total-volume', 0, true);
+        const infusionHoursInput = document.getElementById('infusion-hours');
+        const infusionHours = this.getNumericInput('infusion-hours', 24, true);
         const administrationRoute = document.getElementById('administration-route')?.value || 'central';
 
         if (isNaN(totalVolume) || totalVolume <= 0) {
@@ -1968,15 +2041,25 @@ class NutriSoft {
             if (totalVolumeInput) this.hideErrorMessage(totalVolumeInput);
         }
 
+        if (isNaN(infusionHours) || infusionHours <= 0) {
+            this.dataManager.displayNotification("Horas de perfusão inválidas ou não fornecidas.", "error");
+            if (infusionHoursInput) this.showErrorMessage(infusionHoursInput, "Horas de perfusão devem ser maiores que 0.");
+            document.getElementById('formulation-results')?.classList.add('hidden');
+            return null;
+        } else if (infusionHoursInput) {
+            this.hideErrorMessage(infusionHoursInput);
+        }
+
         try {
             const protocolId = document.getElementById('prescription-protocol')?.value || '';
             const formulation = {
                 patient: patient,
                 protocolId: protocolId,
                 volume: totalVolume, // Prescribed total volume
+                infusionHours: infusionHours,
                 route: administrationRoute,
                 proteins: this.calculateProteins(patient),
-                glucose: this.calculateGlucose(patient),
+                glucose: this.calculateGlucose(patient, infusionHours),
                 lipids: this.calculateLipids(patient),
                 electrolytes: this.calculateElectrolytes(patient),
                 water: { required: 0, solution: 'ÁGUA DESTILADA', volume: 0, error: null }, 
@@ -1996,15 +2079,16 @@ class NutriSoft {
 
             Object.values(formulation.electrolytes || {}).forEach(el => calculatedVolumeSum += (el?.volume || 0));
             Object.values(formulation.additives || {}).forEach(ad => calculatedVolumeSum += (ad?.volume || 0));
-            calculatedVolumeSum = isNaN(calculatedVolumeSum) ? 0 : calculatedVolumeSum;
+            calculatedVolumeSum = isNaN(calculatedVolumeSum) ? 0 : Math.round(calculatedVolumeSum * 10) / 10;
             
             // formulation.volume here is the prescribed totalVolume
-            const waterVolumeNeeded = formulation.volume - calculatedVolumeSum; 
-            formulation.water = { 
-                required: waterVolumeNeeded, 
-                solution: 'ÁGUA DESTILADA', 
-                volume: Math.max(0, waterVolumeNeeded), 
-                error: null 
+            const waterVolumeNeeded = formulation.volume - calculatedVolumeSum;
+            const roundedWaterVolume = roundVolume(Math.max(0, waterVolumeNeeded));
+            formulation.water = {
+                required: waterVolumeNeeded,
+                solution: 'ÁGUA DESTILADA',
+                volume: roundedWaterVolume,
+                error: null
             };
 
             if (waterVolumeNeeded < 0) {
@@ -2484,13 +2568,15 @@ class NutriSoft {
 
         this.setInputValue('prescription-patient', patientId);
         this.setInputValue('total-volume', formulation.volume);
+        this.setInputValue('infusion-hours', formulation.infusionHours ?? 24);
         this.setInputValue('administration-route', formulation.route || 'central');
 
         if (patientWeight > 0) {
             this.setInputValue('protein-needs', (formulation.proteins?.required / patientWeight).toFixed(2));
             this.setInputValue('lipid-needs', (formulation.lipids?.required / patientWeight).toFixed(2));
             const glucose_g_day = formulation.glucose?.required ?? 0;
-            const GIR_mg_kg_min = (glucose_g_day * 1000) / (patientWeight * 1440);
+            const infusionMinutes = Math.max(1, parseNum(formulation.infusionHours, 24) * 60);
+            const GIR_mg_kg_min = (glucose_g_day * 1000) / (patientWeight * infusionMinutes);
             this.setInputValue('glucose-rate', GIR_mg_kg_min.toFixed(2));
 
             this.setInputValue('sodium-needs', (formulation.electrolytes?.sodium?.required / patientWeight).toFixed(2));
