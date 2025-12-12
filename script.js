@@ -3611,22 +3611,25 @@ class NutriSoft {
         this.pdfDrawSafeArea(doc, template, startX, startY);
         this.pdfCalibrationMarks(doc, template, startX, startY);
 
+        // Header and identity
         doc.setFontSize(9); doc.setFont(PDF_THEME.fonts.family, 'italic');
-        doc.text('ULSSM - SG TF', textStartX, currentY); currentY += lineSpacingLabel * 0.9;
+        doc.text('ULSSM · SG TF', textStartX, currentY); currentY += lineSpacingLabel * 0.9;
 
-        this.pdfFitText(doc, `#Prep: ${preparationNumber}`, textStartX, currentY, safeWidth, 12, template.minFont, 'bold');
+        const prepTag = `#Prep: ${preparationNumber}`;
+        this.pdfFitText(doc, prepTag, textStartX, currentY, safeWidth, 12, template.minFont, 'bold');
         currentY += lineSpacingLabel * 1.3;
 
         doc.setFont(PDF_THEME.fonts.family, 'bold');
         this.pdfFitText(doc, `Paciente: ${patientName || 'Doente'}`, textStartX, currentY, safeWidth, 10, template.minFont, 'bold');
-        currentY += lineSpacingLabel * 1.1;
+        currentY += lineSpacingLabel * 1.05;
         if (formulation.patient?.service) {
             doc.setFontSize(8); doc.setFont(PDF_THEME.fonts.family, 'normal');
             this.pdfFitText(doc, `Serviço: ${formulation.patient.service}`, textStartX, currentY, safeWidth, 8, template.minFont);
             currentY += lineSpacingLabel;
         }
 
-        doc.setFontSize(9); doc.setFont(PDF_THEME.fonts.family, 'bold');
+        // Bag summary block
+        doc.setFontSize(8); doc.setFont(PDF_THEME.fonts.family, 'bold');
         let bagType = 'BOLSA ÚNICA (3-em-1)';
         if (isLipidsLabel) { bagType = 'BOLSA DE LÍPIDOS (B)'; doc.setTextColor(0,100,0); }
         else if (formulation.patient?.weight < 5 || formulation.patient?.condition === 'neonate') {
@@ -3636,7 +3639,7 @@ class NutriSoft {
         doc.setTextColor(0,0,0);
         currentY += lineSpacingLabel;
 
-        doc.setFontSize(8); doc.setFont(PDF_THEME.fonts.family, 'normal');
+        doc.setFont(PDF_THEME.fonts.family, 'normal');
         let dDate = 'N/A', dTime = 'N/A';
         try {
             const d = prescriptionDate ? new Date(prescriptionDate) : new Date();
@@ -3645,23 +3648,25 @@ class NutriSoft {
                 dTime=d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
             }
         } catch {}
-        doc.text(`Data Prep.: ${dDate}  Hora: ${dTime}`, textStartX, currentY); currentY += lineSpacingLabel;
-
+        const summaryLines = [];
+        summaryLines.push(`Data Prep.: ${dDate}  Hora: ${dTime}`);
         let bagVol = formulation.volume;
         if (formulation.patient?.weight < 5 || formulation.patient?.condition === 'neonate') {
             const lipidVol = (formulation.lipids?.volume??0) + (formulation.additives?.fat_soluble_vitamins?.volume??0);
             bagVol = isLipidsLabel ? lipidVol : formulation.volume - lipidVol;
         }
-        doc.setFontSize(9); doc.setFont(PDF_THEME.fonts.family, 'normal');
-        doc.text(`Volume: ${this.formatValue(bagVol, 'ml', 0)}`, textStartX, currentY); currentY += lineSpacingLabel;
+        summaryLines.push(`Volume: ${this.formatValue(bagVol, 'ml', 0)} · Via: ${formulation.administrationRoute || 'N/D'}`);
+        const infusion = formulation.infusionRate ? `${formulation.infusionRate.toFixed(0)} ml/h` : 'N/D';
+        const osm = Number.isFinite(formulation.osmolarity) ? `${formulation.osmolarity.toFixed(0)} mOsm/L` : 'Estimado';
+        summaryLines.push(`Infusão: ${infusion} · Osm: ${osm}`);
         const totalEnergy = formulation.energy?.total;
-        if (Number.isFinite(totalEnergy) && totalEnergy > 0) {
-            doc.text(`Energia: ${totalEnergy.toFixed(0)} kcal`, textStartX, currentY); currentY += lineSpacingLabel;
-        }
-        doc.text('Estabilidade até: ____ às ____h', textStartX, currentY); currentY += lineSpacingLabel;
-        doc.text('Conservar 2–8°C · Proteger da luz · Uso IV', textStartX, currentY); currentY += lineSpacingLabel;
+        if (Number.isFinite(totalEnergy) && totalEnergy > 0) summaryLines.push(`Energia: ${totalEnergy.toFixed(0)} kcal`);
+        summaryLines.push('Estabilidade até: ____ às ____h');
+        summaryLines.push('Conservar 2–8°C · Proteger da luz · Uso IV');
+        summaryLines.forEach(line => { doc.text(line, textStartX, currentY); currentY += lineSpacingLabel; });
         doc.text('Escala de impressão: 100% (sem fit-to-page)', textStartX, currentY); currentY += lineSpacingLabel;
 
+        // Composition table (compact and deterministic)
         doc.setFontSize(7); doc.setFont(PDF_THEME.fonts.family, 'bold');
         const col1 = textStartX, col2 = textStartX + 18, col3 = textStartX + 44, col4 = startX + template.width - padding;
         doc.text('Comp', col1, currentY);
@@ -3669,12 +3674,18 @@ class NutriSoft {
         doc.text('Solução', col3, currentY);
         doc.text('Vol', col4, currentY, {align:'right'}); currentY += lineSpacingLabel;
         doc.setFont(PDF_THEME.fonts.family,'normal');
-        const rows = [
+
+        const tableRows = [
             ['AA', this.formatValue(formulation.proteins?.required,'g',0), formulation.proteins?.solution||'', this.formatValue(formulation.proteins?.volume,'ml',0)],
             ['Glu', this.formatValue(formulation.glucose?.required,'g',0), formulation.glucose?.solution||'', this.formatValue(formulation.glucose?.volume,'ml',0)],
-            ['Líp', this.formatValue(formulation.lipids?.required,'g',0), formulation.lipids?.solution||'', this.formatValue(formulation.lipids?.volume,'ml',0)]
+            ['Líp', this.formatValue(formulation.lipids?.required,'g',0), formulation.lipids?.solution||'', this.formatValue(formulation.lipids?.volume,'ml',0)],
+            ['Na', this.formatValue(formulation.electrolytes?.sodium?.displayRequired,'mEq',0), formulation.electrolytes?.sodium?.solution||'', this.formatValue(formulation.electrolytes?.sodium?.volume,'ml',0)],
+            ['K', this.formatValue(formulation.electrolytes?.potassium?.required,'mEq',0), formulation.electrolytes?.potassium?.solution||'', this.formatValue(formulation.electrolytes?.potassium?.volume,'ml',0)],
+            ['Ca', this.formatValue(formulation.electrolytes?.calcium?.required,'mEq',0), formulation.electrolytes?.calcium?.solution||'', this.formatValue(formulation.electrolytes?.calcium?.volume,'ml',0)],
+            ['Mg', this.formatValue(formulation.electrolytes?.magnesium?.required,'mEq',0), formulation.electrolytes?.magnesium?.solution||'', this.formatValue(formulation.electrolytes?.magnesium?.volume,'ml',0)],
+            ['P', this.formatValue(formulation.electrolytes?.phosphorus?.required,'mmol',0), formulation.electrolytes?.phosphorus?.solution||'', this.formatValue(formulation.electrolytes?.phosphorus?.volume,'ml',0)]
         ];
-        rows.forEach(r=>{
+        tableRows.forEach(r=>{
             this.pdfFitText(doc, r[0], col1, currentY, 12, 7, template.minFont);
             this.pdfFitText(doc, r[1], col2, currentY, 20, 7, template.minFont);
             this.pdfFitText(doc, r[2], col3, currentY, safeWidth - 36, 7, template.minFont);
