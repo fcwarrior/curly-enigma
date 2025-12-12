@@ -4,13 +4,13 @@ Esta pasta centraliza tamanhos e convenções gráficas para o mapa de preparaç
 
 ## Ajustar fontes, margens e grelha
 - Edite `PDF_THEME` em `script.js` para alterar margens, paleta de cores e tamanhos tipográficos.
-- `labelLayout` define largura/altura (mm), espaçamento entre etiquetas e padding interno.
-- Sempre mantenha margens internas de pelo menos 5 mm para evitar cortes em impressoras térmicas.
+- `LABEL_TEMPLATES` (em `script.js`) define largura/altura (mm), espaçamento entre etiquetas, padding e safe-area.
+- Sempre mantenha margens internas de pelo menos 5 mm para evitar cortes em impressoras térmicas. Valide a caixa tracejada de safe-area no preview do PDF.
 
 ## Adicionar novos tipos de etiqueta
-1. Crie um preset adicional em `PDF_THEME.labelLayout` ou adicione um novo objeto aqui.
+1. Crie um preset adicional em `LABEL_TEMPLATES` (script.js) com dimensões e safe-area.
 2. Atualize `generateLabelsPage`/`addLabelContent` em `script.js` para usar o preset.
-3. Gere PDFs de exemplo (ver abaixo) para validar alinhamentos.
+3. Gere PDFs de exemplo (ver abaixo) para validar alinhamentos e confirme que a grelha de calibração imprime a 100%.
 
 ## Fluxo de geração
 - O PDF final inclui a ficha de preparação (A4) e, em seguida, as etiquetas (duas colunas, até 4 etiquetas por página).

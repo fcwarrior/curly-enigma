@@ -81,17 +81,48 @@ const PDF_THEME = {
         base: 8.5,
         small: 8,
         label: 9
-    },
-    labelLayout: {
+    }
+};
+
+/**
+ * Label templates are deterministic layouts expressed in millimetres with safe areas
+ * for both laser (A4 multi-up) and térmica (1-up) printing profiles.
+ */
+const LABEL_TEMPLATES = {
+    main: {
+        id: 'main',
         width: 90,
         height: 50,
         padding: 5,
         gapX: 10,
         gapY: 10,
         pageMarginX: 10,
-        pageMarginY: 10
+        pageMarginY: 10,
+        safeArea: { x: 2, y: 2, w: 86, h: 46 },
+        minFont: 6.5
+    },
+    small: {
+        id: 'small',
+        width: 70,
+        height: 35,
+        padding: 4,
+        gapX: 8,
+        gapY: 8,
+        pageMarginX: 12,
+        pageMarginY: 12,
+        safeArea: { x: 2, y: 2, w: 66, h: 31 },
+        minFont: 6
     }
 };
+
+/**
+ * Converts millimetres to PDF points (1 pt = 1/72 in) to aid calibration overlays.
+ * @param {number} mm
+ * @returns {number}
+ */
+function mmToPt(mm) {
+    return (mm / 25.4) * 72;
+}
 
 /**
  * Nutrition guideline tables used to provide quick suggestions according to patient profile.
@@ -2093,14 +2124,15 @@ class NutriSoft {
     }
 
     verifyComponentTotals(formulation, tolerance = 1) {
-        let total = (formulation.proteins?.volume || 0) +
-                    (formulation.glutamine?.volume || 0) +
-                    (formulation.glucose?.volume || 0) +
-                    (formulation.lipids?.volume || 0) +
-                    (formulation.water?.volume || 0);
-        Object.values(formulation.electrolytes || {}).forEach(el => total += (el?.volume || 0));
-        Object.values(formulation.additives || {}).forEach(ad => total += (ad?.volume || 0));
-        const diff = Math.abs(total - (formulation.volume || 0));
+        const collectVolume = (value) => roundVolume(value ?? 0, 1);
+        let total = collectVolume(formulation.proteins?.volume) +
+                    collectVolume(formulation.glutamine?.volume) +
+                    collectVolume(formulation.glucose?.volume) +
+                    collectVolume(formulation.lipids?.volume) +
+                    collectVolume(formulation.water?.volume);
+        Object.values(formulation.electrolytes || {}).forEach(el => total += collectVolume(el?.volume));
+        Object.values(formulation.additives || {}).forEach(ad => total += collectVolume(ad?.volume));
+        const diff = Math.abs(total - collectVolume(formulation.volume));
         if (diff > tolerance) {
             formulation.warnings.push(`Soma dos volumes (${total.toFixed(1)} mL) difere do volume total (${(formulation.volume || 0).toFixed(1)} mL) em ${diff.toFixed(1)} mL.`);
         }
@@ -2143,8 +2175,9 @@ class NutriSoft {
         }
         return "Verificar visualmente a mistura final. Consultar literatura para interações não cobertas.";
     }
-    calculateOsmolarity(formulation) { 
+    calculateOsmolarity(formulation) {
         let totalOsmols = 0;
+        let estimatedFallbackUsed = false;
         const totalVolumeL = (formulation.volume ?? 0) / 1000;
 
         if (totalVolumeL <= 0) return 0;
@@ -2158,19 +2191,38 @@ class NutriSoft {
             if (volumeML > 0 && solution && typeof solution.osmolarityContribution === 'number') {
                 return (volumeML / 1000) * solution.osmolarityContribution;
             }
+
+            // Conservative fallback using concentration when explicit osmolarity is missing
+            if (volumeML > 0 && solution && solution.type === 'electrolyte') {
+                const sodium = solution.sodium_concentration || 0;
+                const potassium = solution.potassium_concentration || 0;
+                const calcium = solution.calcium_concentration || 0;
+                const magnesium = solution.magnesium_concentration || 0;
+                const phosphate = solution.phosphorus_concentration || 0;
+                const mEqTotal = sodium + potassium + calcium + magnesium + (phosphate * 2); // phosphate as divalent approx
+                if (mEqTotal > 0) {
+                    estimatedFallbackUsed = true;
+                    const perL = mEqTotal * 2; // ~2 mOsm por mEq de sal forte
+                    return (volumeML / 1000) * perL;
+                }
+            }
             return 0;
         };
 
         totalOsmols += calculateComponentOsmols(formulation.proteins);
-        totalOsmols += calculateComponentOsmols(formulation.glutamine); 
+        totalOsmols += calculateComponentOsmols(formulation.glutamine);
         totalOsmols += calculateComponentOsmols(formulation.glucose);
         totalOsmols += calculateComponentOsmols(formulation.lipids);
-        totalOsmols += calculateComponentOsmols(formulation.water); 
+        totalOsmols += calculateComponentOsmols(formulation.water);
 
         Object.values(formulation.electrolytes ?? {}).forEach(el_comp => totalOsmols += calculateComponentOsmols(el_comp));
         Object.values(formulation.additives ?? {}).forEach(ad_comp => totalOsmols += calculateComponentOsmols(ad_comp));
 
         const finalOsmolarity = totalOsmols / totalVolumeL;
+        if (estimatedFallbackUsed) {
+            formulation.warnings = formulation.warnings || [];
+            formulation.warnings.push('Osmolaridade estimada para alguns eletrólitos sem dado de rótulo — validar ficha técnica.');
+        }
         return isNaN(finalOsmolarity) || !isFinite(finalOsmolarity) ? 0 : finalOsmolarity;
     }
     validateFormulationAdvanced(formulation, errors = [], warnings = []) { 
@@ -3142,6 +3194,49 @@ class NutriSoft {
         return PDF_THEME.margins.top;
     }
 
+    pdfFitText(doc, text, x, y, maxWidth, baseSize, minSize = 6.5, style = 'normal') {
+        doc.setFont(PDF_THEME.fonts.family, style);
+        let size = baseSize;
+        while (size >= minSize) {
+            doc.setFontSize(size);
+            if (doc.getTextWidth(text) <= maxWidth) {
+                doc.text(text, x, y);
+                return size;
+            }
+            size -= 0.4;
+        }
+        doc.setFontSize(minSize);
+        doc.text(text, x, y, { maxWidth });
+        return minSize;
+    }
+
+    pdfDrawSafeArea(doc, template, startX, startY) {
+        const { safeArea } = template;
+        if (!safeArea) return;
+        doc.setDrawColor(180, 180, 180);
+        doc.setLineWidth(0.2);
+        doc.setLineDash([1, 1], 0);
+        doc.rect(startX + safeArea.x, startY + safeArea.y, safeArea.w, safeArea.h);
+        doc.setLineDash();
+    }
+
+    pdfCalibrationMarks(doc, template, startX, startY) {
+        const size = 2.5;
+        const marks = [
+            [startX, startY],
+            [startX + template.width, startY],
+            [startX, startY + template.height],
+            [startX + template.width, startY + template.height]
+        ];
+        doc.setDrawColor(120, 120, 120);
+        marks.forEach(([mx, my]) => {
+            doc.line(mx - size, my, mx + size, my);
+            doc.line(mx, my - size, mx, my + size);
+        });
+        doc.setFontSize(6);
+        doc.text('Imprimir a 100% · Validar recorte', startX + 2, startY + template.height - 2);
+    }
+
     pdfDrawTable(doc, startX, startY, headers, rows, widths, options = {}) {
         const headerHeight = options.headerHeight || 7;
         const rowHeight = options.rowHeight || 6;
@@ -3490,7 +3585,7 @@ class NutriSoft {
         return details.filter(line => line !== null).join('\n');
     }
     generateLabelsPage(doc, formulation, prepNum, patientName, prescriptionDate) {
-        const layout = PDF_THEME.labelLayout;
+        const template = LABEL_TEMPLATES.main;
         const isTwoBags = (formulation.patient?.weight < 5 && formulation.patient?.condition === 'pediatric') || (formulation.patient?.condition === 'neonate');
         const labels = isTwoBags ? [false, false, true, true] : [false, false, false, false];
         doc.addPage();
@@ -3498,35 +3593,37 @@ class NutriSoft {
             if (idx > 0 && idx % 4 === 0) doc.addPage();
             const col = idx % 2;
             const row = Math.floor((idx % 4) / 2);
-            const x = layout.pageMarginX + col * (layout.width + layout.gapX);
-            const y = layout.pageMarginY + row * (layout.height + layout.gapY);
-            this.addLabelContent(doc, formulation, x, y, isLipids, prepNum, patientName, prescriptionDate);
+            const x = template.pageMarginX + col * (template.width + template.gapX);
+            const y = template.pageMarginY + row * (template.height + template.gapY);
+            this.addLabelContent(doc, formulation, x, y, isLipids, prepNum, patientName, prescriptionDate, template);
         });
     }
-    addLabelContent(doc, formulation, startX, startY, isLipidsLabel, preparationNumber, patientName, prescriptionDate) {
-        const layout = PDF_THEME.labelLayout;
-        const padding = layout.padding;
+    addLabelContent(doc, formulation, startX, startY, isLipidsLabel, preparationNumber, patientName, prescriptionDate, template = LABEL_TEMPLATES.main) {
+        const padding = template.padding;
         const textStartX = startX + padding;
+        const safeWidth = template.safeArea ? template.safeArea.w - 2 : template.width - padding * 2;
         let currentY = startY + padding;
         const lineSpacingLabel = 4;
 
         doc.setDrawColor(...PDF_THEME.palette.border);
         doc.setLineWidth(0.35);
-        doc.rect(startX, startY, layout.width, layout.height);
+        doc.rect(startX, startY, template.width, template.height);
+        this.pdfDrawSafeArea(doc, template, startX, startY);
+        this.pdfCalibrationMarks(doc, template, startX, startY);
 
         doc.setFontSize(9); doc.setFont(PDF_THEME.fonts.family, 'italic');
         doc.text('ULSSM - SG TF', textStartX, currentY); currentY += lineSpacingLabel * 0.9;
 
-        doc.setFontSize(12); doc.setFont(PDF_THEME.fonts.family, 'bold');
-        doc.text(`#Prep: ${preparationNumber}`, textStartX, currentY); currentY += lineSpacingLabel * 1.3;
+        this.pdfFitText(doc, `#Prep: ${preparationNumber}`, textStartX, currentY, safeWidth, 12, template.minFont, 'bold');
+        currentY += lineSpacingLabel * 1.3;
 
-        const maxNameWidthChars = 35;
-        const displayName = (patientName || '').length > maxNameWidthChars ? patientName.substring(0, maxNameWidthChars) + "..." : (patientName || 'Doente');
-        doc.setFontSize(10); doc.setFont(PDF_THEME.fonts.family, 'bold');
-        doc.text(`Paciente: ${displayName}`, textStartX, currentY); currentY += lineSpacingLabel * 1.1;
+        doc.setFont(PDF_THEME.fonts.family, 'bold');
+        this.pdfFitText(doc, `Paciente: ${patientName || 'Doente'}`, textStartX, currentY, safeWidth, 10, template.minFont, 'bold');
+        currentY += lineSpacingLabel * 1.1;
         if (formulation.patient?.service) {
             doc.setFontSize(8); doc.setFont(PDF_THEME.fonts.family, 'normal');
-            doc.text(`Serviço: ${formulation.patient.service}`, textStartX, currentY); currentY += lineSpacingLabel;
+            this.pdfFitText(doc, `Serviço: ${formulation.patient.service}`, textStartX, currentY, safeWidth, 8, template.minFont);
+            currentY += lineSpacingLabel;
         }
 
         doc.setFontSize(9); doc.setFont(PDF_THEME.fonts.family, 'bold');
@@ -3535,19 +3632,19 @@ class NutriSoft {
         else if (formulation.patient?.weight < 5 || formulation.patient?.condition === 'neonate') {
             bagType = 'BOLSA AQUOSA (A)'; doc.setTextColor(0,0,139);
         }
-        doc.text(bagType, textStartX, currentY);
+        this.pdfFitText(doc, bagType, textStartX, currentY, safeWidth, 9, template.minFont, 'bold');
         doc.setTextColor(0,0,0);
         currentY += lineSpacingLabel;
 
         doc.setFontSize(8); doc.setFont(PDF_THEME.fonts.family, 'normal');
         let dDate = 'N/A', dTime = 'N/A';
-        try{
+        try {
             const d = prescriptionDate ? new Date(prescriptionDate) : new Date();
             if(!isNaN(d.getTime())){
                 dDate=d.toLocaleDateString();
-                dTime=d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+                dTime=d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
             }
-        }catch{}
+        } catch {}
         doc.text(`Data Prep.: ${dDate}  Hora: ${dTime}`, textStartX, currentY); currentY += lineSpacingLabel;
 
         let bagVol = formulation.volume;
@@ -3561,11 +3658,12 @@ class NutriSoft {
         if (Number.isFinite(totalEnergy) && totalEnergy > 0) {
             doc.text(`Energia: ${totalEnergy.toFixed(0)} kcal`, textStartX, currentY); currentY += lineSpacingLabel;
         }
-        doc.text('Estabilidade até: ____ / ____ h', textStartX, currentY); currentY += lineSpacingLabel;
+        doc.text('Estabilidade até: ____ às ____h', textStartX, currentY); currentY += lineSpacingLabel;
         doc.text('Conservar 2–8°C · Proteger da luz · Uso IV', textStartX, currentY); currentY += lineSpacingLabel;
+        doc.text('Escala de impressão: 100% (sem fit-to-page)', textStartX, currentY); currentY += lineSpacingLabel;
 
         doc.setFontSize(7); doc.setFont(PDF_THEME.fonts.family, 'bold');
-        const col1 = textStartX, col2 = textStartX + 18, col3 = textStartX + 44, col4 = startX + layout.width - padding;
+        const col1 = textStartX, col2 = textStartX + 18, col3 = textStartX + 44, col4 = startX + template.width - padding;
         doc.text('Comp', col1, currentY);
         doc.text('Dose', col2, currentY);
         doc.text('Solução', col3, currentY);
@@ -3577,9 +3675,9 @@ class NutriSoft {
             ['Líp', this.formatValue(formulation.lipids?.required,'g',0), formulation.lipids?.solution||'', this.formatValue(formulation.lipids?.volume,'ml',0)]
         ];
         rows.forEach(r=>{
-            doc.text(r[0], col1, currentY);
-            doc.text(r[1], col2, currentY);
-            doc.text(r[2], col3, currentY);
+            this.pdfFitText(doc, r[0], col1, currentY, 12, 7, template.minFont);
+            this.pdfFitText(doc, r[1], col2, currentY, 20, 7, template.minFont);
+            this.pdfFitText(doc, r[2], col3, currentY, safeWidth - 36, 7, template.minFont);
             doc.text(r[3], col4, currentY, {align:'right'});
             currentY+=lineSpacingLabel;
         });
@@ -3587,8 +3685,8 @@ class NutriSoft {
         doc.setFontSize(7); doc.setFont(PDF_THEME.fonts.family, 'italic');
         doc.text('Ass. Preparador: _________   Ass. Revisor: _________', textStartX, currentY); currentY += lineSpacingLabel;
         doc.text('Vigiar sítio de punção e parâmetros metabólicos.', textStartX, currentY);
-        doc.rect(startX + layout.width - padding - 20, startY + layout.height - padding - 15, 18, 13);
-        doc.text('[QR/BC]', startX + layout.width - padding - 18, startY + layout.height - padding - 5, {align: 'left'});
+        doc.rect(startX + template.width - padding - 20, startY + template.height - padding - 15, 18, 13);
+        doc.text('[QR/BC]', startX + template.width - padding - 18, startY + template.height - padding - 5, {align: 'left'});
     }
     showAuditLogsModal() { 
         const modal = document.getElementById('audit-logs-modal');
