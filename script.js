@@ -63,6 +63,37 @@ function roundVolume(value, decimalPlaces = 1) {
 }
 
 /**
+ * Shared PDF layout tokens to keep worksheet and labels consistent and maintainable.
+ */
+const PDF_THEME = {
+    margins: { top: 12, left: 12, right: 12, bottom: 14 },
+    palette: {
+        border: [33, 37, 41],
+        subtleBorder: [210, 214, 220],
+        headerFill: [245, 247, 250],
+        warning: [255, 204, 128],
+        error: [236, 112, 99]
+    },
+    fonts: {
+        family: 'helvetica',
+        title: 15,
+        section: 10,
+        base: 8.5,
+        small: 8,
+        label: 9
+    },
+    labelLayout: {
+        width: 90,
+        height: 50,
+        padding: 5,
+        gapX: 10,
+        gapY: 10,
+        pageMarginX: 10,
+        pageMarginY: 10
+    }
+};
+
+/**
  * Nutrition guideline tables used to provide quick suggestions according to patient profile.
  * Values are expressed as ranges so that the mid value can be surfaced to the user.
  */
@@ -3081,14 +3112,15 @@ class NutriSoft {
                 return;
             }
 
-            const { jsPDF } = window.jspdf;
-            const doc = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4' });
+            const doc = this.createPdfDocument();
 
             this.generateWorksheetPage(doc, formulation, preparationMap, preparationNumber, patientName, prescriptionDate);
 
             this.generateLabelsPage(doc, formulation, preparationNumber, patientName, prescriptionDate);
 
-            const filename = `PN_${String(preparationNumber).replace(/\W/g, '')}_${patientName.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}.pdf`;
+            const fileNameSafePatient = (patientName || 'doente').replace(/[^a-z0-9]/gi, '_').toLowerCase();
+            const timestamp = new Date().toISOString().split('T')[0];
+            const filename = `nutrisoft_${fileNameSafePatient}_prep${preparationNumber}_${timestamp}.pdf`;
             doc.save(filename);
             console.log("PDF generated:", filename);
         } catch (error) {
@@ -3098,86 +3130,121 @@ class NutriSoft {
         }
     }
 
+    createPdfDocument() {
+        const { jsPDF } = window.jspdf;
+        return new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4' });
+    }
 
+    pdfEnsureSpace(doc, currentY, requiredHeight) {
+        const pageHeight = doc.internal.pageSize.getHeight();
+        if (currentY + requiredHeight <= pageHeight - PDF_THEME.margins.bottom) return currentY;
+        doc.addPage();
+        return PDF_THEME.margins.top;
+    }
+
+    pdfDrawTable(doc, startX, startY, headers, rows, widths, options = {}) {
+        const headerHeight = options.headerHeight || 7;
+        const rowHeight = options.rowHeight || 6;
+        let y = startY;
+        const maxWidth = doc.internal.pageSize.getWidth() - PDF_THEME.margins.right;
+
+        const drawHeader = () => {
+            let x = startX;
+            doc.setFontSize(PDF_THEME.fonts.small);
+            doc.setFont(PDF_THEME.fonts.family, 'bold');
+            doc.setDrawColor(...PDF_THEME.palette.subtleBorder);
+            doc.setFillColor(...PDF_THEME.palette.headerFill);
+            headers.forEach((header, idx) => {
+                const width = widths[idx];
+                doc.rect(x, y, width, headerHeight, 'FD');
+                doc.text(String(header), x + 1.5, y + headerHeight - 2);
+                x += width;
+            });
+            y += headerHeight;
+        };
+
+        const drawRow = (row) => {
+            let x = startX;
+            doc.setFont(PDF_THEME.fonts.family, options.bodyFontStyle || 'normal');
+            doc.setFontSize(PDF_THEME.fonts.small);
+            row.forEach((cell, idx) => {
+                const width = widths[idx];
+                const text = cell === undefined || cell === null ? '' : String(cell);
+                doc.rect(x, y, width, rowHeight);
+                doc.text(text, x + 1.5, y + rowHeight - 2, { maxWidth: width - 3 });
+                x += width;
+            });
+            y += rowHeight;
+        };
+
+        drawHeader();
+        rows.forEach(row => {
+            if (startX + widths.reduce((a, b) => a + b, 0) > maxWidth) {
+                console.warn('Tabela excedeu largura, ajuste de colunas necessário.');
+            }
+            y = this.pdfEnsureSpace(doc, y, rowHeight + PDF_THEME.margins.bottom);
+            drawRow(row);
+        });
+        return y;
+    }
 
     generateWorksheetPage(doc, formulation, preparationMap, prepNumber, patientName, prescriptionDate) {
-        const pageWidth = doc.internal.pageSize.getWidth();
-        const margin = 12;
-        const usableWidth = pageWidth - margin * 2;
-        let y = margin;
+        const margin = PDF_THEME.margins.left;
+        const usableWidth = doc.internal.pageSize.getWidth() - PDF_THEME.margins.left - PDF_THEME.margins.right;
+        let y = PDF_THEME.margins.top;
         const patient = formulation.patient || {};
         const energy = formulation.energy || {};
         const weight = Number(patient.weight) || 0;
 
-        const drawTable = (startX, startY, headers, rows, widths) => {
-            let cursorY = startY;
-            let cursorX = startX;
-            doc.setFontSize(8);
-            doc.setDrawColor(200);
-            doc.setFillColor(243, 244, 246);
-            headers.forEach((header, idx) => {
-                const width = widths[idx];
-                doc.rect(cursorX, cursorY, width, 7, 'FD');
-                doc.text(String(header), cursorX + 1.5, cursorY + 4.6);
-                cursorX += width;
-            });
-            cursorY += 7;
-            doc.setFontSize(8);
-            doc.setFont(undefined, 'normal');
-            rows.forEach(row => {
-                cursorX = startX;
-                row.forEach((cell, idx) => {
-                    const width = widths[idx];
-                    doc.rect(cursorX, cursorY, width, 6);
-                    const text = cell === undefined || cell === null ? '' : String(cell);
-                    doc.text(text, cursorX + 1.5, cursorY + 4.2, { maxWidth: width - 3 });
-                    cursorX += width;
-                });
-                cursorY += 6;
-            });
-            return cursorY;
-        };
+        const safeDate = (() => {
+            try {
+                const d = prescriptionDate ? new Date(prescriptionDate) : new Date();
+                return `${d.toLocaleDateString()} ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+            } catch (err) {
+                console.warn('Erro a formatar data da prescrição', err);
+                return 'N/A';
+            }
+        })();
 
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(16);
-        doc.text('PARENTERAL NUTRITION SOLUTION', pageWidth / 2, y, { align: 'center' });
-        y += 10;
-
-        let dateStr = 'N/A';
         try {
-            dateStr = prescriptionDate ? new Date(prescriptionDate).toLocaleDateString() : new Date().toLocaleDateString();
-        } catch {}
+            doc.addImage('ULSSMsgtf.jpg', 'JPEG', PDF_THEME.margins.left, y - 4, 26, 12);
+        } catch (err) {
+            console.warn('Logótipo não carregado no PDF', err);
+        }
 
-        const infoBoxHeight = 34;
-        const infoWidth = usableWidth * 0.65;
-        doc.setDrawColor(210);
-        doc.rect(margin, y, infoWidth, infoBoxHeight);
-        doc.setFont('helvetica', 'normal');
-        doc.setFontSize(8.5);
-        const infoLines = [
-            ['#Prep', prepNumber],
-            ['Data Prescrição', dateStr],
-            ['Paciente', patientName],
-            ['Via', formulation.route === 'peripheral' ? 'Periférica' : 'Central'],
-            ['Peso', this.formatValue(patient.weight, 'kg', 1)],
-            ['Altura', patient.height ? this.formatValue(patient.height, 'cm', 0) : '---'],
-            ['Condição', patient.condition || '---'],
-            ['Médico', patient.physician || '---'],
-            ['Processo', patient.processNumber || patient.admissionNumber || '---']
+        doc.setFont(PDF_THEME.fonts.family, 'bold');
+        doc.setFontSize(PDF_THEME.fonts.title);
+        doc.text('NutriSoft · Nutrição Parentérica', doc.internal.pageSize.getWidth() / 2, y + 2, { align: 'center' });
+        doc.setFontSize(PDF_THEME.fonts.section);
+        doc.text('Ficha de Preparação Farmacêutica', doc.internal.pageSize.getWidth() / 2, y + 8, { align: 'center' });
+        y += 14;
+
+        const headerBoxHeight = 36;
+        doc.setDrawColor(...PDF_THEME.palette.border);
+        doc.rect(margin, y, usableWidth * 0.68, headerBoxHeight);
+        doc.setFont(PDF_THEME.fonts.family, 'normal');
+        doc.setFontSize(PDF_THEME.fonts.base);
+        const headerLines = [
+            [`#Prep: ${prepNumber}`, `Data: ${safeDate}`],
+            [`Paciente: ${patientName || '---'}`, `Processo: ${patient.processNumber || patient.admissionNumber || '---'}`],
+            [`Condição: ${patient.condition || '---'}`, `Médico: ${patient.physician || '---'}`],
+            [`Peso: ${this.formatValue(patient.weight, 'kg', 1)}`, `Via: ${formulation.route === 'peripheral' ? 'Periférica' : 'Central'}`]
         ];
         let infoY = y + 6;
-        infoLines.forEach(([label, value]) => {
-            doc.text(`${label}: ${value}`, margin + 3, infoY);
-            infoY += 6;
+        headerLines.forEach(line => {
+            doc.text(line[0], margin + 3, infoY);
+            doc.text(line[1], margin + usableWidth * 0.35, infoY);
+            infoY += 7;
         });
 
-        const barcodeWidth = usableWidth - infoWidth - 6;
-        doc.setDrawColor(180);
-        doc.rect(margin + infoWidth + 4, y, barcodeWidth, 24);
-        doc.setFontSize(7);
-        doc.setFont('helvetica', 'italic');
-        doc.text('Código de Barras', margin + infoWidth + 4 + barcodeWidth / 2, y + 12, { align: 'center' });
-        y += Math.max(infoBoxHeight, 26) + 6;
+        const barcodeBoxX = margin + usableWidth * 0.7;
+        const barcodeBoxW = usableWidth * 0.3;
+        doc.setDrawColor(...PDF_THEME.palette.subtleBorder);
+        doc.rect(barcodeBoxX, y, barcodeBoxW, headerBoxHeight);
+        doc.setFontSize(PDF_THEME.fonts.small);
+        doc.setFont(PDF_THEME.fonts.family, 'italic');
+        doc.text('Código/QR da Preparação', barcodeBoxX + barcodeBoxW / 2, y + headerBoxHeight / 2, { align: 'center' });
+        y += headerBoxHeight + 6;
 
         const proteins = formulation.proteins || {};
         const glucose = formulation.glucose || {};
@@ -3213,10 +3280,10 @@ class NutriSoft {
             ]
         ];
 
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(10);
+        doc.setFont(PDF_THEME.fonts.family, 'bold');
+        doc.setFontSize(PDF_THEME.fonts.section);
         doc.text('Macronutrientes e Energia', margin, y - 2);
-        y = drawTable(margin, y, ['Componente', 'Dose', 'Dose/kg', 'Energia', 'Notas'], macroRows, [38, 28, 28, 30, usableWidth - 124]);
+        y = this.pdfDrawTable(doc, margin, y, ['Componente', 'Dose', 'Dose/kg', 'Energia', 'Notas'], macroRows, [40, 30, 30, 30, usableWidth - 130]);
         y += 4;
 
         const componentRows = [];
@@ -3237,15 +3304,15 @@ class NutriSoft {
                     noteParts.push(`Alvo ${this.formatValue(component.recommended, doseUnit, 2)}`);
                 }
             }
-            if (component.source) noteParts.push(component.source === 'direct' ? 'Dose prescrita' : 'Calculado');
+            if (component.source) noteParts.push(component.source === 'direct' ? 'Prescrito' : 'Calculado');
             if (component.fromPhosphorus && label.startsWith('Sódio')) {
                 noteParts.push(`${this.formatValue(component.fromPhosphorus, 'mEq', 2)} do Fosfato`);
             }
             if (component.error) noteParts.push(`⚠ ${component.error}`);
             componentRows.push([
                 label,
+                component.solution || '---',
                 this.formatValue(dose, doseUnit, options.doseDp ?? 2),
-                component.solution || '',
                 this.formatValue(volume, volumeUnit, options.volumeDp ?? 1),
                 noteParts.join(' · ')
             ]);
@@ -3277,10 +3344,10 @@ class NutriSoft {
         }
         pushRow('Água Estéril', formulation.water, { doseKey: 'volume', doseUnit: 'ml' });
 
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(10);
+        doc.setFont(PDF_THEME.fonts.family, 'bold');
+        doc.setFontSize(PDF_THEME.fonts.section);
         doc.text('Ingredientes da Nutrição Parentérica', margin, y - 2);
-        y = drawTable(margin, y, ['Componente', 'Dose', 'Solução', 'Volume', 'Notas'], componentRows, [40, 28, 42, 28, usableWidth - 138]);
+        y = this.pdfDrawTable(doc, margin, y, ['Componente', 'Stock/Concentração', 'Dose', 'Volume (ml)', 'Observações'], componentRows, [40, 42, 26, 28, usableWidth - 136]);
         y += 4;
 
         const properties = [
@@ -3293,11 +3360,11 @@ class NutriSoft {
         ];
 
         const propWidth = (usableWidth - 4) / 2;
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(10);
+        doc.setFont(PDF_THEME.fonts.family, 'bold');
+        doc.setFontSize(PDF_THEME.fonts.section);
         doc.text('Propriedades da Administração', margin, y - 2);
-        doc.setFont('helvetica', 'normal');
-        doc.setFontSize(8);
+        doc.setFont(PDF_THEME.fonts.family, 'normal');
+        doc.setFontSize(PDF_THEME.fonts.small);
         let propY = y;
         properties.forEach((row, idx) => {
             const x = margin + (idx % 2) * (propWidth + 4);
@@ -3305,15 +3372,16 @@ class NutriSoft {
             doc.rect(x, currentY, propWidth, 7);
             doc.text(`${row[0]}: ${row[1]}`, x + 2, currentY + 4.5);
         });
-        y = propY + Math.ceil(properties.length / 2) * 7 + 6;
+        y = propY + Math.ceil(properties.length / 2) * 7 + 8;
 
         if (preparationMap) {
-            doc.setFont('helvetica', 'bold');
-            doc.setFontSize(9);
-            doc.text('Mapa de Preparação', margin, y);
+            y = this.pdfEnsureSpace(doc, y, 30);
+            doc.setFont(PDF_THEME.fonts.family, 'bold');
+            doc.setFontSize(PDF_THEME.fonts.section);
+            doc.text('Mapa de Preparação (Ordem de Aditivos)', margin, y);
             y += 4;
-            doc.setFont('helvetica', 'normal');
-            doc.setFontSize(8);
+            doc.setFont(PDF_THEME.fonts.family, 'normal');
+            doc.setFontSize(PDF_THEME.fonts.small);
             const prepLines = doc.splitTextToSize(preparationMap, usableWidth);
             prepLines.forEach(line => {
                 doc.text(line, margin, y);
@@ -3321,43 +3389,37 @@ class NutriSoft {
             });
         }
 
-        if (formulation.warnings?.length) {
-            doc.setFont('helvetica', 'bold');
-            doc.setFontSize(9);
-            doc.setTextColor(255, 140, 0);
-            doc.text('Avisos de Formulação', margin, y);
-            y += 4;
-            doc.setFont('helvetica', 'normal');
-            doc.setFontSize(8);
+        const drawStackedBox = (title, items, color) => {
+            if (!items || !items.length) return;
+            y = this.pdfEnsureSpace(doc, y, 14 + items.length * 4);
+            doc.setFont(PDF_THEME.fonts.family, 'bold');
+            doc.setFontSize(PDF_THEME.fonts.section);
+            doc.setFillColor(...color);
+            doc.rect(margin, y, usableWidth, 8, 'F');
             doc.setTextColor(0, 0, 0);
-            formulation.warnings.forEach(w => {
-                doc.text(`• ${w}`, margin, y, { maxWidth: usableWidth });
+            doc.text(title, margin + 2, y + 5);
+            y += 10;
+            doc.setFont(PDF_THEME.fonts.family, 'normal');
+            doc.setFontSize(PDF_THEME.fonts.small);
+            items.forEach(msg => {
+                doc.text(`• ${msg}`, margin + 2, y, { maxWidth: usableWidth - 4 });
                 y += 4;
             });
-        }
+            y += 2;
+        };
 
-        if (formulation.errors?.length) {
-            doc.setFont('helvetica', 'bold');
-            doc.setFontSize(9);
-            doc.setTextColor(200, 16, 46);
-            doc.text('Erros Críticos', margin, y);
-            y += 4;
-            doc.setFont('helvetica', 'normal');
-            doc.setFontSize(8);
-            doc.setTextColor(0, 0, 0);
-            formulation.errors.forEach(err => {
-                doc.text(`• ${err}`, margin, y, { maxWidth: usableWidth });
-                y += 4;
-            });
-        }
+        drawStackedBox('Avisos de Formulação', formulation.warnings || [], PDF_THEME.palette.warning);
+        drawStackedBox('Erros Críticos', formulation.errors || [], PDF_THEME.palette.error);
 
-        y += 8;
-        doc.setFont('helvetica', 'italic');
-        doc.setFontSize(8);
-        doc.text('Preparador: ___________________________', margin, y);
-        doc.text('Revisor: ___________________________', margin + usableWidth / 2, y);
-        y += 5;
+        y = this.pdfEnsureSpace(doc, y, 16);
+        doc.setFont(PDF_THEME.fonts.family, 'italic');
+        doc.setFontSize(PDF_THEME.fonts.small);
+        doc.text('Preparado por: ___________________________', margin, y);
+        doc.text('Conferido por: ___________________________', margin + usableWidth / 2, y);
+        y += 6;
         doc.text('Data/Hora de Revisão: ___________________________', margin, y);
+        y += 6;
+        doc.text(`Software NutriSoft · versão local · Hash prescrição: ${formulation.hash || '—'}`, margin, y);
     }
 
 
@@ -3428,8 +3490,7 @@ class NutriSoft {
         return details.filter(line => line !== null).join('\n');
     }
     generateLabelsPage(doc, formulation, prepNum, patientName, prescriptionDate) {
-        const labelWidth = 90, labelHeight = 50;
-        const marginX = 10, marginY = 10, gapX = 10, gapY = 10;
+        const layout = PDF_THEME.labelLayout;
         const isTwoBags = (formulation.patient?.weight < 5 && formulation.patient?.condition === 'pediatric') || (formulation.patient?.condition === 'neonate');
         const labels = isTwoBags ? [false, false, true, true] : [false, false, false, false];
         doc.addPage();
@@ -3437,45 +3498,48 @@ class NutriSoft {
             if (idx > 0 && idx % 4 === 0) doc.addPage();
             const col = idx % 2;
             const row = Math.floor((idx % 4) / 2);
-            const x = marginX + col * (labelWidth + gapX);
-            const y = marginY + row * (labelHeight + gapY);
+            const x = layout.pageMarginX + col * (layout.width + layout.gapX);
+            const y = layout.pageMarginY + row * (layout.height + layout.gapY);
             this.addLabelContent(doc, formulation, x, y, isLipids, prepNum, patientName, prescriptionDate);
         });
     }
     addLabelContent(doc, formulation, startX, startY, isLipidsLabel, preparationNumber, patientName, prescriptionDate) {
-        const labelWidth = 90; const labelHeight = 50; const padding = 5;
+        const layout = PDF_THEME.labelLayout;
+        const padding = layout.padding;
         const textStartX = startX + padding;
         let currentY = startY + padding;
         const lineSpacingLabel = 4;
 
-        doc.setDrawColor(0); doc.setLineWidth(0.3); doc.rect(startX, startY, labelWidth, labelHeight);
+        doc.setDrawColor(...PDF_THEME.palette.border);
+        doc.setLineWidth(0.35);
+        doc.rect(startX, startY, layout.width, layout.height);
 
-        doc.setFontSize(9); doc.setFont(undefined, 'italic');
+        doc.setFontSize(9); doc.setFont(PDF_THEME.fonts.family, 'italic');
         doc.text('ULSSM - SG TF', textStartX, currentY); currentY += lineSpacingLabel * 0.9;
 
-        doc.setFontSize(12); doc.setFont(undefined, 'bold');
-        doc.text(`#Prep: ${preparationNumber}`, textStartX, currentY); currentY += lineSpacingLabel * 1.2;
+        doc.setFontSize(12); doc.setFont(PDF_THEME.fonts.family, 'bold');
+        doc.text(`#Prep: ${preparationNumber}`, textStartX, currentY); currentY += lineSpacingLabel * 1.3;
 
         const maxNameWidthChars = 35;
-        const displayName = patientName.length > maxNameWidthChars ? patientName.substring(0, maxNameWidthChars) + "..." : patientName;
-        doc.setFontSize(10); doc.setFont(undefined, 'bold');
+        const displayName = (patientName || '').length > maxNameWidthChars ? patientName.substring(0, maxNameWidthChars) + "..." : (patientName || 'Doente');
+        doc.setFontSize(10); doc.setFont(PDF_THEME.fonts.family, 'bold');
         doc.text(`Paciente: ${displayName}`, textStartX, currentY); currentY += lineSpacingLabel * 1.1;
         if (formulation.patient?.service) {
-            doc.setFontSize(8); doc.setFont(undefined, 'normal');
+            doc.setFontSize(8); doc.setFont(PDF_THEME.fonts.family, 'normal');
             doc.text(`Serviço: ${formulation.patient.service}`, textStartX, currentY); currentY += lineSpacingLabel;
         }
 
-        doc.setFontSize(9); doc.setFont(undefined, 'bold');
+        doc.setFontSize(9); doc.setFont(PDF_THEME.fonts.family, 'bold');
         let bagType = 'BOLSA ÚNICA (3-em-1)';
-        if (isLipidsLabel) { bagType = 'BOLSA DE LÍPIDOS (B)'; doc.setTextColor(0,100,0); } 
-        else if (formulation.patient?.weight < 5 || formulation.patient?.condition === 'neonate') { 
-            bagType = 'BOLSA AQUOSA (A)'; doc.setTextColor(0,0,139); 
+        if (isLipidsLabel) { bagType = 'BOLSA DE LÍPIDOS (B)'; doc.setTextColor(0,100,0); }
+        else if (formulation.patient?.weight < 5 || formulation.patient?.condition === 'neonate') {
+            bagType = 'BOLSA AQUOSA (A)'; doc.setTextColor(0,0,139);
         }
         doc.text(bagType, textStartX, currentY);
-        doc.setTextColor(0,0,0); 
+        doc.setTextColor(0,0,0);
         currentY += lineSpacingLabel;
 
-        doc.setFontSize(8); doc.setFont(undefined, 'normal');
+        doc.setFontSize(8); doc.setFont(PDF_THEME.fonts.family, 'normal');
         let dDate = 'N/A', dTime = 'N/A';
         try{
             const d = prescriptionDate ? new Date(prescriptionDate) : new Date();
@@ -3491,38 +3555,40 @@ class NutriSoft {
             const lipidVol = (formulation.lipids?.volume??0) + (formulation.additives?.fat_soluble_vitamins?.volume??0);
             bagVol = isLipidsLabel ? lipidVol : formulation.volume - lipidVol;
         }
-        doc.setFontSize(9); doc.setFont(undefined, 'normal');
+        doc.setFontSize(9); doc.setFont(PDF_THEME.fonts.family, 'normal');
         doc.text(`Volume: ${this.formatValue(bagVol, 'ml', 0)}`, textStartX, currentY); currentY += lineSpacingLabel;
         const totalEnergy = formulation.energy?.total;
         if (Number.isFinite(totalEnergy) && totalEnergy > 0) {
             doc.text(`Energia: ${totalEnergy.toFixed(0)} kcal`, textStartX, currentY); currentY += lineSpacingLabel;
         }
-        doc.text(`Validade: (Definir conforme protocolo)`, textStartX, currentY); currentY += lineSpacingLabel;
+        doc.text('Estabilidade até: ____ / ____ h', textStartX, currentY); currentY += lineSpacingLabel;
+        doc.text('Conservar 2–8°C · Proteger da luz · Uso IV', textStartX, currentY); currentY += lineSpacingLabel;
 
-        doc.setFontSize(7); doc.setFont(undefined, 'bold');
-        const col1 = textStartX, col2 = textStartX + 18, col3 = textStartX + 44, col4 = startX + labelWidth - padding;
+        doc.setFontSize(7); doc.setFont(PDF_THEME.fonts.family, 'bold');
+        const col1 = textStartX, col2 = textStartX + 18, col3 = textStartX + 44, col4 = startX + layout.width - padding;
         doc.text('Comp', col1, currentY);
         doc.text('Dose', col2, currentY);
         doc.text('Solução', col3, currentY);
         doc.text('Vol', col4, currentY, {align:'right'}); currentY += lineSpacingLabel;
-        doc.setFont(undefined,'normal');
+        doc.setFont(PDF_THEME.fonts.family,'normal');
         const rows = [
             ['AA', this.formatValue(formulation.proteins?.required,'g',0), formulation.proteins?.solution||'', this.formatValue(formulation.proteins?.volume,'ml',0)],
             ['Glu', this.formatValue(formulation.glucose?.required,'g',0), formulation.glucose?.solution||'', this.formatValue(formulation.glucose?.volume,'ml',0)],
             ['Líp', this.formatValue(formulation.lipids?.required,'g',0), formulation.lipids?.solution||'', this.formatValue(formulation.lipids?.volume,'ml',0)]
         ];
-        rows.forEach(r=>{ 
+        rows.forEach(r=>{
             doc.text(r[0], col1, currentY);
             doc.text(r[1], col2, currentY);
             doc.text(r[2], col3, currentY);
             doc.text(r[3], col4, currentY, {align:'right'});
-            currentY+=lineSpacingLabel; 
+            currentY+=lineSpacingLabel;
         });
 
-        doc.setFontSize(7); doc.setFont(undefined, 'italic');
-        doc.text('Conservar refrigerado. Proteger da luz.', textStartX, currentY);
-        doc.rect(startX + labelWidth - padding - 20, startY + labelHeight - padding - 15, 18, 13); 
-        doc.text('[QR/BC]', startX + labelWidth - padding - 18, startY + labelHeight - padding - 5, {align: 'left'});
+        doc.setFontSize(7); doc.setFont(PDF_THEME.fonts.family, 'italic');
+        doc.text('Ass. Preparador: _________   Ass. Revisor: _________', textStartX, currentY); currentY += lineSpacingLabel;
+        doc.text('Vigiar sítio de punção e parâmetros metabólicos.', textStartX, currentY);
+        doc.rect(startX + layout.width - padding - 20, startY + layout.height - padding - 15, 18, 13);
+        doc.text('[QR/BC]', startX + layout.width - padding - 18, startY + layout.height - padding - 5, {align: 'left'});
     }
     showAuditLogsModal() { 
         const modal = document.getElementById('audit-logs-modal');
