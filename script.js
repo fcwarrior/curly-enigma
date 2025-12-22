@@ -3189,9 +3189,9 @@ class NutriSoft {
 
     pdfEnsureSpace(doc, currentY, requiredHeight) {
         const pageHeight = doc.internal.pageSize.getHeight();
-        if (currentY + requiredHeight <= pageHeight - PDF_THEME.margins.bottom) return currentY;
+        if (currentY + requiredHeight <= pageHeight - PDF_THEME.margins.bottom) return { y: currentY, pageAdded: false };
         doc.addPage();
-        return PDF_THEME.margins.top;
+        return { y: PDF_THEME.margins.top, pageAdded: true };
     }
 
     pdfFitText(doc, text, x, y, maxWidth, baseSize, minSize = 6.5, style = 'normal') {
@@ -3277,7 +3277,13 @@ class NutriSoft {
             if (startX + widths.reduce((a, b) => a + b, 0) > maxWidth) {
                 console.warn('Tabela excedeu largura, ajuste de colunas necessário.');
             }
-            y = this.pdfEnsureSpace(doc, y, rowHeight + PDF_THEME.margins.bottom);
+            const ensured = this.pdfEnsureSpace(doc, y, rowHeight + PDF_THEME.margins.bottom);
+            if (ensured.pageAdded) {
+                y = ensured.y;
+                drawHeader();
+            } else {
+                y = ensured.y;
+            }
             drawRow(row);
         });
         return y;
@@ -3290,6 +3296,7 @@ class NutriSoft {
         const patient = formulation.patient || {};
         const energy = formulation.energy || {};
         const weight = Number(patient.weight) || 0;
+        const headerText = 'Ficha de Preparação Farmacêutica';
 
         const safeDate = (() => {
             try {
@@ -3311,7 +3318,7 @@ class NutriSoft {
         doc.setFontSize(PDF_THEME.fonts.title);
         doc.text('NutriSoft · Nutrição Parentérica', doc.internal.pageSize.getWidth() / 2, y + 2, { align: 'center' });
         doc.setFontSize(PDF_THEME.fonts.section);
-        doc.text('Ficha de Preparação Farmacêutica', doc.internal.pageSize.getWidth() / 2, y + 8, { align: 'center' });
+        doc.text(headerText, doc.internal.pageSize.getWidth() / 2, y + 8, { align: 'center' });
         y += 14;
 
         const headerBoxHeight = 36;
@@ -3470,7 +3477,13 @@ class NutriSoft {
         y = propY + Math.ceil(properties.length / 2) * 7 + 8;
 
         if (preparationMap) {
-            y = this.pdfEnsureSpace(doc, y, 30);
+            const ensured = this.pdfEnsureSpace(doc, y, 30);
+            y = ensured.y;
+            if (ensured.pageAdded) {
+                doc.setFont(PDF_THEME.fonts.family, 'bold');
+                doc.setFontSize(PDF_THEME.fonts.section);
+                doc.text(headerText, margin, y - 4);
+            }
             doc.setFont(PDF_THEME.fonts.family, 'bold');
             doc.setFontSize(PDF_THEME.fonts.section);
             doc.text('Mapa de Preparação (Ordem de Aditivos)', margin, y);
@@ -3486,7 +3499,13 @@ class NutriSoft {
 
         const drawStackedBox = (title, items, color) => {
             if (!items || !items.length) return;
-            y = this.pdfEnsureSpace(doc, y, 14 + items.length * 4);
+            const ensured = this.pdfEnsureSpace(doc, y, 14 + items.length * 4);
+            y = ensured.y;
+            if (ensured.pageAdded) {
+                doc.setFont(PDF_THEME.fonts.family, 'bold');
+                doc.setFontSize(PDF_THEME.fonts.section);
+                doc.text(headerText, margin, y - 4);
+            }
             doc.setFont(PDF_THEME.fonts.family, 'bold');
             doc.setFontSize(PDF_THEME.fonts.section);
             doc.setFillColor(...color);
@@ -3506,7 +3525,13 @@ class NutriSoft {
         drawStackedBox('Avisos de Formulação', formulation.warnings || [], PDF_THEME.palette.warning);
         drawStackedBox('Erros Críticos', formulation.errors || [], PDF_THEME.palette.error);
 
-        y = this.pdfEnsureSpace(doc, y, 16);
+        const ensuredSign = this.pdfEnsureSpace(doc, y, 16);
+        y = ensuredSign.y;
+        if (ensuredSign.pageAdded) {
+            doc.setFont(PDF_THEME.fonts.family, 'bold');
+            doc.setFontSize(PDF_THEME.fonts.section);
+            doc.text(headerText, margin, y - 4);
+        }
         doc.setFont(PDF_THEME.fonts.family, 'italic');
         doc.setFontSize(PDF_THEME.fonts.small);
         doc.text('Preparado por: ___________________________', margin, y);
@@ -3675,6 +3700,7 @@ class NutriSoft {
         doc.text('Vol', col4, currentY, {align:'right'}); currentY += lineSpacingLabel;
         doc.setFont(PDF_THEME.fonts.family,'normal');
 
+        const maxY = startY + template.height - padding;
         const tableRows = [
             ['AA', this.formatValue(formulation.proteins?.required,'g',0), formulation.proteins?.solution||'', this.formatValue(formulation.proteins?.volume,'ml',0)],
             ['Glu', this.formatValue(formulation.glucose?.required,'g',0), formulation.glucose?.solution||'', this.formatValue(formulation.glucose?.volume,'ml',0)],
@@ -3685,13 +3711,20 @@ class NutriSoft {
             ['Mg', this.formatValue(formulation.electrolytes?.magnesium?.required,'mEq',0), formulation.electrolytes?.magnesium?.solution||'', this.formatValue(formulation.electrolytes?.magnesium?.volume,'ml',0)],
             ['P', this.formatValue(formulation.electrolytes?.phosphorus?.required,'mmol',0), formulation.electrolytes?.phosphorus?.solution||'', this.formatValue(formulation.electrolytes?.phosphorus?.volume,'ml',0)]
         ];
-        tableRows.forEach(r=>{
+
+        for (const r of tableRows) {
+            if (currentY + lineSpacingLabel > maxY) {
+                doc.setFontSize(7); doc.setFont(PDF_THEME.fonts.family, 'italic');
+                doc.text('… ver detalhes no mapa de preparação/PDF completo', textStartX, maxY - 1);
+                break;
+            }
             this.pdfFitText(doc, r[0], col1, currentY, 12, 7, template.minFont);
             this.pdfFitText(doc, r[1], col2, currentY, 20, 7, template.minFont);
-            this.pdfFitText(doc, r[2], col3, currentY, safeWidth - 36, 7, template.minFont);
+            const solutionLines = doc.splitTextToSize(r[2], safeWidth - 36);
+            doc.text(solutionLines, col3, currentY, { maxWidth: safeWidth - 36 });
             doc.text(r[3], col4, currentY, {align:'right'});
-            currentY+=lineSpacingLabel;
-        });
+            currentY += Math.max(lineSpacingLabel, solutionLines.length * 3.2);
+        }
 
         doc.setFontSize(7); doc.setFont(PDF_THEME.fonts.family, 'italic');
         doc.text('Ass. Preparador: _________   Ass. Revisor: _________', textStartX, currentY); currentY += lineSpacingLabel;
