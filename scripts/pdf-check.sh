@@ -23,7 +23,8 @@ const txt = fs.readFileSync('script.js', 'utf8');
 const required = [
   'unit: \'mm\'',
   'safeArea',
-  'PROTEGER\\nDA LUZ',
+  'PROTEGER',
+  'DA LUZ',
   'generateLabelsPage',
   'pdfDrawTable'
 ];

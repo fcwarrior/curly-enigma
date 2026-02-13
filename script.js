@@ -3661,7 +3661,19 @@ class NutriSoft {
             const row = Math.floor((idx % 4) / 2);
             const x = template.pageMarginX + col * (template.width + template.gapX);
             const y = template.pageMarginY + row * (template.height + template.gapY);
-            this.addLabelContent(doc, formulation, x, y, isLipids, prepNum, patientName, prescriptionDate, template);
+            try {
+                this.addLabelContent(doc, formulation, x, y, isLipids, prepNum, patientName, prescriptionDate, template);
+            } catch (labelError) {
+                console.error('Erro ao renderizar rótulo:', labelError);
+                doc.setDrawColor(...PDF_THEME.palette.border);
+                doc.rect(x, y, template.width, template.height);
+                doc.setFont(PDF_THEME.fonts.family, 'bold');
+                doc.setFontSize(9);
+                doc.text(`Erro no rótulo #${idx + 1}`, x + 4, y + 8);
+                doc.setFont(PDF_THEME.fonts.family, 'normal');
+                doc.setFontSize(7);
+                doc.text(String(labelError?.message || 'Falha inesperada no layout.'), x + 4, y + 13, { maxWidth: template.width - 8 });
+            }
         });
         doc.setFont(PDF_THEME.fonts.family, 'italic');
         doc.setFontSize(7);
@@ -3773,11 +3785,10 @@ class NutriSoft {
         doc.setDrawColor(...PDF_THEME.palette.border);
         doc.rect(rightX, safeStartY + padding, rightBandW, splitY - safeStartY - padding * 1.2);
         doc.setFont(PDF_THEME.fonts.family, 'bold');
-        doc.setFontSize(9.2);
-        doc.text('PROTEGER\nDA LUZ', rightX + rightBandW / 2, safeStartY + (splitY - safeStartY) / 2 + 2.5, {
-            align: 'center',
-            angle: 90
-        });
+        doc.setFontSize(8.6);
+        const lightProtectCenterY = safeStartY + (splitY - safeStartY) / 2;
+        doc.text('PROTEGER', rightX + rightBandW / 2, lightProtectCenterY - 1.2, { align: 'center' });
+        doc.text('DA LUZ', rightX + rightBandW / 2, lightProtectCenterY + 2.8, { align: 'center' });
 
         doc.rect(rightX, splitY + 0.5, qrBox.w, qrBox.h);
         doc.setFontSize(6.8);
