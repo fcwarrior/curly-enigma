@@ -322,6 +322,13 @@ class DataManager {
             accessLevel: 'admin',
             permissions: { exportData: true },
             osmolarityLimits: { peripheral: 900, central: 1500 },
+            clinicalValidation: {
+                protein: { warning: 2.5, highWarning: 4.0 },
+                lipid: { warning: 2.5, highWarning: 4.0 },
+                gir: { warning: 7, highWarning: 14 },
+                caPhos: { warning: 30, hard: 45 },
+                peripheralOsmAlertRatio: 0.9
+            },
             patientCategories: [
                 {
                     id: 'cat-adult',
@@ -364,7 +371,27 @@ class DataManager {
             ...defaults,
             ...savedSettings,
             permissions: { ...defaults.permissions, ...(savedSettings.permissions || {}) },
-            osmolarityLimits: { ...defaults.osmolarityLimits, ...(savedSettings.osmolarityLimits || {}) }
+            osmolarityLimits: { ...defaults.osmolarityLimits, ...(savedSettings.osmolarityLimits || {}) },
+            clinicalValidation: {
+                ...defaults.clinicalValidation,
+                ...(savedSettings.clinicalValidation || {}),
+                protein: {
+                    ...defaults.clinicalValidation.protein,
+                    ...(savedSettings.clinicalValidation?.protein || {})
+                },
+                lipid: {
+                    ...defaults.clinicalValidation.lipid,
+                    ...(savedSettings.clinicalValidation?.lipid || {})
+                },
+                gir: {
+                    ...defaults.clinicalValidation.gir,
+                    ...(savedSettings.clinicalValidation?.gir || {})
+                },
+                caPhos: {
+                    ...defaults.clinicalValidation.caPhos,
+                    ...(savedSettings.clinicalValidation?.caPhos || {})
+                }
+            }
         };
     }
 
@@ -2234,24 +2261,30 @@ class NutriSoft {
              return; 
         }
         const weight = patient.weight;
+        const validation = this.settings?.clinicalValidation || {};
+        const proteinLimits = validation.protein || { warning: 2.5, highWarning: 4.0 };
+        const lipidLimits = validation.lipid || { warning: 2.5, highWarning: 4.0 };
+        const girLimits = validation.gir || { warning: 7, highWarning: 14 };
+        const caPhosLimits = validation.caPhos || { warning: 30, hard: 45 };
+        const peripheralOsmAlertRatio = parseNum(validation.peripheralOsmAlertRatio, 0.9);
         if (weight <= 0) {
             errors.push("Peso do doente inválido para validação avançada de doses.");
             return;
         }
 
         const protein_g_kg = (formulation.proteins?.required ?? 0) / weight;
-        if (protein_g_kg > 4.0) warnings.push(`Dose de Proteínas (${protein_g_kg.toFixed(1)} g/kg) muito elevada. Verificar indicação.`);
-        else if (protein_g_kg > 2.5) warnings.push(`Dose de Proteínas (${protein_g_kg.toFixed(1)} g/kg) elevada. Considerar ajuste.`);
+        if (protein_g_kg > proteinLimits.highWarning) warnings.push(`Dose de Proteínas (${protein_g_kg.toFixed(1)} g/kg) muito elevada. Verificar indicação.`);
+        else if (protein_g_kg > proteinLimits.warning) warnings.push(`Dose de Proteínas (${protein_g_kg.toFixed(1)} g/kg) elevada. Considerar ajuste.`);
 
         const glucose_g_day = formulation.glucose?.required ?? 0;
         const infusionMinutes = Math.max(1, parseNum(formulation.infusionHours, 24) * 60);
         const GIR_mg_kg_min = (glucose_g_day * 1000) / (weight * infusionMinutes);
-        if (GIR_mg_kg_min > 14 && patient.condition !== 'pediatric' && patient.condition !== 'critical') warnings.push(`Taxa de Infusão de Glucose (GIR: ${GIR_mg_kg_min.toFixed(1)} mg/kg/min) muito elevada para adulto não crítico. Risco de hiperglicemia.`);
-        else if (GIR_mg_kg_min > 7 && patient.condition !== 'pediatric' && patient.condition !== 'critical') warnings.push(`Taxa de Infusão de Glucose (GIR: ${GIR_mg_kg_min.toFixed(1)} mg/kg/min) elevada. Monitorizar glicemia.`);
+        if (GIR_mg_kg_min > girLimits.highWarning && patient.condition !== 'pediatric' && patient.condition !== 'critical') warnings.push(`Taxa de Infusão de Glucose (GIR: ${GIR_mg_kg_min.toFixed(1)} mg/kg/min) muito elevada para adulto não crítico. Risco de hiperglicemia.`);
+        else if (GIR_mg_kg_min > girLimits.warning && patient.condition !== 'pediatric' && patient.condition !== 'critical') warnings.push(`Taxa de Infusão de Glucose (GIR: ${GIR_mg_kg_min.toFixed(1)} mg/kg/min) elevada. Monitorizar glicemia.`);
 
         const lipid_g_kg = (formulation.lipids?.required ?? 0) / weight;
-        if (lipid_g_kg > 4.0) warnings.push(`Dose de Lípidos (${lipid_g_kg.toFixed(1)} g/kg) muito elevada. Risco de hipertrigliceridemia.`);
-        else if (lipid_g_kg > 2.5) warnings.push(`Dose de Lípidos (${lipid_g_kg.toFixed(1)} g/kg) elevada. Monitorizar triglicerídeos.`);
+        if (lipid_g_kg > lipidLimits.highWarning) warnings.push(`Dose de Lípidos (${lipid_g_kg.toFixed(1)} g/kg) muito elevada. Risco de hipertrigliceridemia.`);
+        else if (lipid_g_kg > lipidLimits.warning) warnings.push(`Dose de Lípidos (${lipid_g_kg.toFixed(1)} g/kg) elevada. Monitorizar triglicerídeos.`);
 
 
         const ca = formulation.electrolytes?.calcium;
@@ -2271,8 +2304,8 @@ class NutriSoft {
 
         const caPhosSum = caConcFinal_mEq_L + phosConcFinal_mmol_L; 
         if (caConcFinal_mEq_L > 0 && phosConcFinal_mmol_L > 0) { 
-            if (caPhosSum > 45) errors.push(`Risco Elevado de Precipitação Ca/P: Soma [Ca(mEq/L)+P(mmol/L)] = ${caPhosSum.toFixed(1)} > 45. Consultar curvas de compatibilidade.`);
-            else if (caPhosSum > 30) warnings.push(`Atenção Risco Precipitação Ca/P: Soma [Ca(mEq/L)+P(mmol/L)] = ${caPhosSum.toFixed(1)} > 30. Considerar ordem de adição e tipo de AA.`);
+            if (caPhosSum > caPhosLimits.hard) errors.push(`Risco Elevado de Precipitação Ca/P: Soma [Ca(mEq/L)+P(mmol/L)] = ${caPhosSum.toFixed(1)} > ${caPhosLimits.hard}. Consultar curvas de compatibilidade.`);
+            else if (caPhosSum > caPhosLimits.warning) warnings.push(`Atenção Risco Precipitação Ca/P: Soma [Ca(mEq/L)+P(mmol/L)] = ${caPhosSum.toFixed(1)} > ${caPhosLimits.warning}. Considerar ordem de adição e tipo de AA.`);
         }
 
         const osmLimits = this.settings.osmolarityLimits || { peripheral: 900, central: 1500 };
@@ -2281,7 +2314,7 @@ class NutriSoft {
 
         if (formulation.osmolarity > osmLimit) {
             errors.push(`ERRO Osmolaridade: ${formulation.osmolarity.toFixed(0)} mOsm/L excede o limite de ${osmLimit} mOsm/L para via ${route}. Risco de flebite/trombose.`);
-        } else if (formulation.osmolarity > osmLimit * 0.90 && route === 'peripheral') { 
+        } else if (formulation.osmolarity > osmLimit * peripheralOsmAlertRatio && route === 'peripheral') { 
             warnings.push(`Aviso Osmolaridade: ${formulation.osmolarity.toFixed(0)} mOsm/L está próxima do limite (${osmLimit} mOsm/L) para via periférica.`);
         }
 
@@ -3635,19 +3668,13 @@ class NutriSoft {
         doc.text('Imprimir a 100% · Validar recorte · Sem fit-to-page', PDF_THEME.margins.left, doc.internal.pageSize.getHeight() - 6);
     }
     addLabelContent(doc, formulation, startX, startY, isLipidsLabel, preparationNumber, patientName, prescriptionDate, template = LABEL_TEMPLATES.main) {
-        const padding = template.padding;
-        const safeArea = template.safeArea || { x: padding, y: padding, w: template.width - padding * 2, h: template.height - padding * 2 };
-        const innerPadding = 1.5;
-        const safeStartX = startX + safeArea.x + innerPadding;
-        const safeStartY = startY + safeArea.y + innerPadding;
-        const safeWidth = safeArea.w - innerPadding * 2;
-        const safeHeight = safeArea.h - innerPadding * 2;
-        let currentY = safeStartY;
-        const lineHeight = (fontSize) => (fontSize * 0.3528) * 1.15;
-        const qrBox = { w: 18, h: 13 };
-        const footerFont = 7;
-        const footerHeight = lineHeight(footerFont) * 2 + 1;
-        const reservedBottom = Math.max(footerHeight, qrBox.h + 2) + 1;
+        const safeArea = template.safeArea || { x: 2, y: 2, w: template.width - 4, h: template.height - 4 };
+        const safeStartX = startX + safeArea.x;
+        const safeStartY = startY + safeArea.y;
+        const safeWidth = safeArea.w;
+        const safeHeight = safeArea.h;
+        const padding = 1.6;
+        const lineHeight = (fontSize) => (fontSize * 0.3528) * 1.12;
 
         doc.setDrawColor(...PDF_THEME.palette.border);
         doc.setLineWidth(0.35);
@@ -3655,128 +3682,114 @@ class NutriSoft {
         this.pdfDrawSafeArea(doc, template, startX, startY);
         this.pdfCalibrationMarks(doc, template, startX, startY);
 
-        // Header and identity
-        doc.setFontSize(9); doc.setFont(PDF_THEME.fonts.family, 'italic');
-        doc.text('ULSSM · SG TF', safeStartX, currentY); currentY += lineHeight(9);
+        const qrBox = { w: 17, h: 12 };
+        const rightBandW = 16;
+        const leftX = safeStartX + padding;
+        const leftW = safeWidth - rightBandW - padding * 3;
+        const rightX = safeStartX + safeWidth - rightBandW - padding;
+        const splitY = safeStartY + safeHeight - qrBox.h - 4.2;
 
-        const prepTag = `#Prep: ${preparationNumber}`;
-        this.pdfFitText(doc, prepTag, safeStartX, currentY, safeWidth, 12, template.minFont, 'bold');
-        currentY += lineHeight(12);
+        doc.setFont(PDF_THEME.fonts.family, 'italic');
+        doc.setFontSize(7.5);
+        doc.text('ULSSM · Serviços Farmacêuticos', leftX, safeStartY + padding + lineHeight(7.5));
 
         doc.setFont(PDF_THEME.fonts.family, 'bold');
-        this.pdfFitText(doc, `Paciente: ${patientName || 'Doente'}`, safeStartX, currentY, safeWidth, 10, template.minFont, 'bold');
-        currentY += lineHeight(10);
-        if (formulation.patient?.service) {
-            doc.setFontSize(8); doc.setFont(PDF_THEME.fonts.family, 'normal');
-            this.pdfFitText(doc, `Serviço: ${formulation.patient.service}`, safeStartX, currentY, safeWidth, 8, template.minFont);
-            currentY += lineHeight(8);
-        }
+        this.pdfFitText(doc, `#Prep ${preparationNumber}`, leftX, safeStartY + 8.5, leftW, 12, 8.2, 'bold');
 
-        // Bag summary block
-        doc.setFontSize(8); doc.setFont(PDF_THEME.fonts.family, 'bold');
         let bagType = 'BOLSA ÚNICA (3-em-1)';
-        if (isLipidsLabel) { bagType = 'BOLSA DE LÍPIDOS (B)'; doc.setTextColor(0,100,0); }
-        else if (formulation.patient?.weight < 5 || formulation.patient?.condition === 'neonate') {
-            bagType = 'BOLSA AQUOSA (A)'; doc.setTextColor(0,0,139);
-        }
-        this.pdfFitText(doc, bagType, safeStartX, currentY, safeWidth, 9, template.minFont, 'bold');
-        doc.setTextColor(0,0,0);
-        currentY += lineHeight(9);
+        if (isLipidsLabel) bagType = 'BOLSA LÍPIDOS (B)';
+        else if (formulation.patient?.weight < 5 || formulation.patient?.condition === 'neonate') bagType = 'BOLSA AQUOSA (A)';
 
+        const patientDisplay = patientName || 'Doente';
+        doc.setFont(PDF_THEME.fonts.family, 'bold');
+        this.pdfFitText(doc, `Doente: ${patientDisplay}`, leftX, safeStartY + 12.8, leftW, 8.6, 7.5, 'bold');
         doc.setFont(PDF_THEME.fonts.family, 'normal');
-        let dDate = 'N/A', dTime = 'N/A';
-        try {
-            const d = prescriptionDate ? new Date(prescriptionDate) : new Date();
-            if(!isNaN(d.getTime())){
-                dDate=d.toLocaleDateString();
-                dTime=d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
-            }
-        } catch {}
-        const summaryLines = [];
-        summaryLines.push(`Data Prep.: ${dDate}  Hora: ${dTime}`);
+        const serviceDisplay = formulation.patient?.service ? `Serviço: ${formulation.patient.service}` : 'Serviço: N/D';
+        this.pdfFitText(doc, serviceDisplay, leftX, safeStartY + 16.6, leftW, 7.8, 7.2, 'normal');
+
+        doc.setDrawColor(...PDF_THEME.palette.subtleBorder);
+        doc.line(leftX, safeStartY + 18.1, leftX + leftW, safeStartY + 18.1);
+
+        doc.setFont(PDF_THEME.fonts.family, 'bold');
+        this.pdfFitText(doc, bagType, leftX, safeStartY + 21.4, leftW, 8.5, 7.4, 'bold');
+
+        const dt = prescriptionDate ? new Date(prescriptionDate) : new Date();
+        const dtDate = Number.isNaN(dt.getTime()) ? 'N/D' : dt.toLocaleDateString('pt-PT');
+        const dtTime = Number.isNaN(dt.getTime()) ? 'N/D' : dt.toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' });
         let bagVol = formulation.volume;
         if (formulation.patient?.weight < 5 || formulation.patient?.condition === 'neonate') {
-            const lipidVol = (formulation.lipids?.volume??0) + (formulation.additives?.fat_soluble_vitamins?.volume??0);
-            bagVol = isLipidsLabel ? lipidVol : formulation.volume - lipidVol;
-        }
-        summaryLines.push(`Volume: ${this.formatValue(bagVol, 'ml', 0)} · Via: ${formulation.administrationRoute || 'N/D'}`);
-        const infusion = formulation.infusionRate ? `${formulation.infusionRate.toFixed(0)} ml/h` : 'N/D';
-        const osm = Number.isFinite(formulation.osmolarity) ? `${formulation.osmolarity.toFixed(0)} mOsm/L` : 'Estimado';
-        summaryLines.push(`Infusão: ${infusion} · Osm: ${osm}`);
-        const totalEnergy = formulation.energy?.total;
-        if (Number.isFinite(totalEnergy) && totalEnergy > 0) summaryLines.push(`Energia: ${totalEnergy.toFixed(0)} kcal`);
-        summaryLines.push('Estabilidade até: ____ às ____h');
-        summaryLines.push('Conservar 2–8°C · Proteger da luz · Uso IV');
-        const renderSummary = (fontSize) => {
-            doc.setFontSize(fontSize);
-            const summaryLineHeight = lineHeight(fontSize);
-            const allowedHeight = Math.max(0, safeStartY + safeHeight - reservedBottom - currentY);
-            const maxLines = Math.floor(allowedHeight / summaryLineHeight);
-            const linesToRender = [];
-            summaryLines.forEach((line) => {
-                const wrapped = doc.splitTextToSize(line, safeWidth);
-                linesToRender.push(...wrapped);
-            });
-            const clipped = linesToRender.slice(0, Math.max(0, maxLines));
-            clipped.forEach(line => {
-                doc.text(line, safeStartX, currentY);
-                currentY += summaryLineHeight;
-            });
-            return linesToRender.length <= maxLines;
-        };
-
-        if (!renderSummary(8)) {
-            currentY = Math.max(currentY - lineHeight(8) * 2, safeStartY);
-            renderSummary(7);
+            const lipidVol = (formulation.lipids?.volume ?? 0) + (formulation.additives?.fat_soluble_vitamins?.volume ?? 0);
+            bagVol = isLipidsLabel ? lipidVol : Math.max(0, formulation.volume - lipidVol);
         }
 
-        // Composition table (compact and deterministic)
-        doc.setFontSize(7); doc.setFont(PDF_THEME.fonts.family, 'bold');
-        const col1 = safeStartX;
-        const col2 = safeStartX + 18;
-        const col3 = safeStartX + 44;
-        const col4 = safeStartX + safeWidth;
-        doc.text('Comp', col1, currentY);
-        doc.text('Dose', col2, currentY);
-        doc.text('Solução', col3, currentY);
-        doc.text('Vol', col4, currentY, {align:'right'});
-        currentY += lineHeight(7);
-        doc.setFont(PDF_THEME.fonts.family,'normal');
-
-        const maxY = safeStartY + safeHeight - reservedBottom;
-        const tableRows = [
-            ['AA', this.formatValue(formulation.proteins?.required,'g',0), formulation.proteins?.solution||'', this.formatValue(formulation.proteins?.volume,'ml',0)],
-            ['Glu', this.formatValue(formulation.glucose?.required,'g',0), formulation.glucose?.solution||'', this.formatValue(formulation.glucose?.volume,'ml',0)],
-            ['Líp', this.formatValue(formulation.lipids?.required,'g',0), formulation.lipids?.solution||'', this.formatValue(formulation.lipids?.volume,'ml',0)],
-            ['Na', this.formatValue(formulation.electrolytes?.sodium?.displayRequired,'mEq',0), formulation.electrolytes?.sodium?.solution||'', this.formatValue(formulation.electrolytes?.sodium?.volume,'ml',0)],
-            ['K', this.formatValue(formulation.electrolytes?.potassium?.required,'mEq',0), formulation.electrolytes?.potassium?.solution||'', this.formatValue(formulation.electrolytes?.potassium?.volume,'ml',0)],
-            ['Ca', this.formatValue(formulation.electrolytes?.calcium?.required,'mEq',0), formulation.electrolytes?.calcium?.solution||'', this.formatValue(formulation.electrolytes?.calcium?.volume,'ml',0)],
-            ['Mg', this.formatValue(formulation.electrolytes?.magnesium?.required,'mEq',0), formulation.electrolytes?.magnesium?.solution||'', this.formatValue(formulation.electrolytes?.magnesium?.volume,'ml',0)],
-            ['P', this.formatValue(formulation.electrolytes?.phosphorus?.required,'mmol',0), formulation.electrolytes?.phosphorus?.solution||'', this.formatValue(formulation.electrolytes?.phosphorus?.volume,'ml',0)]
+        const infusion = formulation.infusionRate ? `${formulation.infusionRate.toFixed(1)} ml/h` : 'N/D';
+        const osm = Number.isFinite(formulation.osmolarity) ? `${formulation.osmolarity.toFixed(0)} mOsm/L` : 'estimado';
+        const metaRows = [
+            ['Data', `${dtDate} ${dtTime}`],
+            ['Volume', `${this.formatValue(bagVol, 'ml', 0)}`],
+            ['Via', `${formulation.administrationRoute || 'N/D'}`],
+            ['Infusão', infusion],
+            ['Osm', osm]
         ];
 
-        for (const r of tableRows) {
-            if (currentY + lineHeight(7) > maxY) {
-                doc.setFontSize(7); doc.setFont(PDF_THEME.fonts.family, 'italic');
-                doc.text('… ver detalhes no mapa de preparação/PDF completo', safeStartX, maxY - 1);
-                break;
-            }
-            this.pdfFitText(doc, r[0], col1, currentY, 12, 7, template.minFont);
-            this.pdfFitText(doc, r[1], col2, currentY, 20, 7, template.minFont);
-            const solutionLines = doc.splitTextToSize(r[2], safeWidth - 36);
-            doc.text(solutionLines, col3, currentY, { maxWidth: safeWidth - 36 });
-            doc.text(r[3], col4, currentY, {align:'right'});
-            currentY += Math.max(lineHeight(7), solutionLines.length * lineHeight(7));
+        let y = safeStartY + 24.2;
+        doc.setFontSize(7.1);
+        doc.setFont(PDF_THEME.fonts.family, 'normal');
+        metaRows.forEach(([k, v]) => {
+            if (y > splitY - 7) return;
+            doc.setFont(PDF_THEME.fonts.family, 'bold');
+            doc.text(`${k}:`, leftX, y);
+            doc.setFont(PDF_THEME.fonts.family, 'normal');
+            doc.text(String(v), leftX + 12.2, y, { maxWidth: leftW - 13 });
+            y += lineHeight(7.1);
+        });
+
+        const nutrientRows = [
+            ['Azoto', this.formatValue(formulation.proteins?.required ?? 0, 'g', 2)],
+            ['Glicose', this.formatValue(formulation.glucose?.required ?? 0, 'g', 1)],
+            ['Sódio', this.formatValue(formulation.electrolytes?.sodium?.displayRequired ?? 0, 'mEq', 1)],
+            ['Cal. Totais', this.formatValue(formulation.energy?.total ?? 0, 'kcal', 0)]
+        ];
+
+        const tableTop = y + 0.6;
+        const tableBottom = splitY - 0.9;
+        if (tableBottom - tableTop > 6) {
+            doc.setDrawColor(...PDF_THEME.palette.border);
+            doc.rect(leftX, tableTop, leftW, tableBottom - tableTop);
+            doc.line(leftX + leftW * 0.62, tableTop, leftX + leftW * 0.62, tableBottom);
+            let rowY = tableTop + 2.8;
+            const rowStep = Math.max(2.8, (tableBottom - tableTop - 1.5) / nutrientRows.length);
+            nutrientRows.forEach(([label, value], idx) => {
+                if (idx > 0) doc.line(leftX, rowY - 1.8, leftX + leftW, rowY - 1.8);
+                doc.setFont(PDF_THEME.fonts.family, 'bold');
+                doc.setFontSize(7.2);
+                doc.text(label, leftX + 1.1, rowY);
+                doc.setFont(PDF_THEME.fonts.family, 'normal');
+                doc.text(value, leftX + leftW - 1.2, rowY, { align: 'right' });
+                rowY += rowStep;
+            });
         }
 
-        const footerY = safeStartY + safeHeight - footerHeight + lineHeight(7);
-        doc.setFontSize(7); doc.setFont(PDF_THEME.fonts.family, 'italic');
-        doc.text('Ass. Preparador: _________   Ass. Revisor: _________', safeStartX, footerY);
-        doc.text('Vigiar sítio de punção e parâmetros metabólicos.', safeStartX, footerY + lineHeight(7));
-        const qrX = safeStartX + safeWidth - qrBox.w;
-        const qrY = safeStartY + safeHeight - qrBox.h;
-        doc.rect(qrX, qrY, qrBox.w, qrBox.h);
-        doc.text('[QR/BC]', qrX + 2, qrY + qrBox.h - 3, {align: 'left'});
+        doc.setDrawColor(...PDF_THEME.palette.border);
+        doc.rect(rightX, safeStartY + padding, rightBandW, splitY - safeStartY - padding * 1.2);
+        doc.setFont(PDF_THEME.fonts.family, 'bold');
+        doc.setFontSize(9.2);
+        doc.text('PROTEGER\nDA LUZ', rightX + rightBandW / 2, safeStartY + (splitY - safeStartY) / 2 + 2.5, {
+            align: 'center',
+            angle: 90
+        });
+
+        doc.rect(rightX, splitY + 0.5, qrBox.w, qrBox.h);
+        doc.setFontSize(6.8);
+        doc.setFont(PDF_THEME.fonts.family, 'italic');
+        doc.text('[QR/BC]', rightX + 2.2, splitY + qrBox.h - 1.8);
+
+        doc.setDrawColor(...PDF_THEME.palette.subtleBorder);
+        doc.line(leftX, splitY, leftX + leftW, splitY);
+        doc.setFont(PDF_THEME.fonts.family, 'italic');
+        doc.setFontSize(6.5);
+        doc.text('Ass. Preparador: ___________  Ass. Revisor: ___________', leftX, splitY + 3.3, { maxWidth: leftW });
+        doc.text('Conservar 2–8°C · Uso IV · Sem fit-to-page', leftX, splitY + 6.2, { maxWidth: leftW });
     }
     showAuditLogsModal() { 
         const modal = document.getElementById('audit-logs-modal');

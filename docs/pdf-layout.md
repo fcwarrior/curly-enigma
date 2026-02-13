@@ -1,38 +1,41 @@
 # Layout PDF (NutriSoft)
 
-## Objetivo
-Documentar o layout determinístico dos PDFs (Mapa de Preparação e Etiquetas), garantindo consistência de impressão e ausência de cortes/overflows.
+## Diagnóstico da causa raiz
+Os cortes/sobreposições observados nos rótulos vinham de uma combinação de:
+- excesso de texto em etiquetas de 90x50 mm sem reserva rígida de rodapé/QR;
+- alturas de linha parcialmente fixas em vez de derivadas da fonte;
+- blocos de resumo + tabela a competir pelo mesmo espaço útil;
+- variação de impressão quando o utilizador aplicava *fit-to-page*.
 
-## Unidade e grelha
-- Unidade base: **mm** (jsPDF com `unit: 'mm'`).
-- Conversões: usar `mm` diretamente, evitando px.
-- Margens globais A4: `PDF_THEME.margins`.
+## Estratégia aplicada (determinística)
+- Motor mantido em **jsPDF nativo** (sem HTML->PDF).
+- Unidade global em **mm** (`new jsPDF({ unit: 'mm' })`).
+- Templates em `LABEL_TEMPLATES` com **safe area explícita**.
+- Blocos com dimensões fixas e hierarquia estável (header, meta, tabela, banda lateral, rodapé, QR).
 
-## Etiquetas (label templates)
-Localização: `LABEL_TEMPLATES` em `script.js`.
+## Etiquetas principais (90 × 50 mm, 4-up em A4)
+- Dimensão do rótulo: `90 x 50 mm`.
+- Safe area: `86 x 46 mm` (offset 2 mm).
+- Banda lateral fixa: `16 mm` (texto vertical “PROTEGER DA LUZ”).
+- Caixa QR/BC fixa: `17 x 12 mm`.
+- Rodapé reservado para assinaturas e conservação.
 
-### Template principal
-- Dimensão: **90 × 50 mm** (4 por página A4).
-- Safe area: **86 × 46 mm** com offset **2 mm**.
-- Padding interno: **1.5 mm** (em `addLabelContent`).
-- Caixa QR/BC: **18 × 13 mm** (canto inferior direito dentro da safe area).
-- Reservas: rodapé + QR calculados para impedir sobreposição.
+## Regras de overflow
+- Texto crítico passa por `pdfFitText` com mínimo de fonte controlado.
+- Linhas de metadados usam `lineHeight(fontSize)` para evitar sobreposição.
+- Quadro nutricional só desenha se houver altura útil mínima.
+- Conteúdo longo prioriza campos críticos e preserva legibilidade.
 
-### Regras de layout
-- Todo o conteúdo deve ficar dentro da `safeArea`.
-- Linha/altura calculada com base no tamanho de fonte (`lineHeight`), sem valores fixos.
-- `pdfFitText` reduz a fonte quando necessário (mínimo: `template.minFont`).
-- Blocos longos são truncados com indicação “ver detalhes no mapa de preparação”.
+## Mapa de preparação
+- `pdfDrawTable` usa altura de linha dinâmica por célula (`splitTextToSize`).
+- Cabeçalho reaparece após quebra de página.
+- Evita quebra de item a meio quando a altura necessária não cabe na página.
 
-### Instruções de impressão
-- Imprimir a **100%** (sem “fit to page”).
-- Validar marcas de calibração nos quatro cantos.
+## Instruções de impressão
+- Imprimir sempre a **100%**.
+- Desativar *fit to page* / *shrink to fit*.
+- Confirmar marcas de calibração de canto e recorte.
 
-## Mapa de Preparação
-- Tabelas com altura de linha dinâmica (`pdfDrawTable`) para evitar corte de texto.
-- Cabeçalhos repetidos após quebra de página.
-
-## Ajustes futuros
-- Atualizar dimensões em `LABEL_TEMPLATES`.
-- Manter `safeArea` e `reservedBottom` consistentes com novos blocos.
-- Se adicionar campos, validar: (1) safe area, (2) linha dinâmica, (3) truncagem.
+## Ficheiros relevantes
+- `script.js`: `generateWorksheetPage`, `generateLabelsPage`, `addLabelContent`, `pdfDrawTable`.
+- `scripts/pdf-check.sh`: verificações estruturais mínimas de regressão.

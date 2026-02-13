@@ -1,18 +1,30 @@
 # Validação Clínica (NutriSoft)
 
 ## Objetivo
-Listar regras clínicas atuais de validação e onde são aplicadas, para auditoria e manutenção.
+Definir as validações clínicas usadas no motor de cálculo/segurança e os respetivos limites configuráveis.
 
-## Regras implementadas (resumo)
-- **Compatibilidade Ca/P**: avisos e erros baseados na soma `[Ca mEq/L + P mmol/L]`.
-- **Osmolaridade**: cálculo e comparação com limites por via de administração (periférica/central).
-- **Limites por condição clínica**: avisos para insuficiência renal/hepática e doente crítico.
-- **Volume total**: validação contra somatório de volumes com aviso/erro quando excedido.
+## Limites configuráveis (`settings.clinicalValidation`)
+- `protein.warning` / `protein.highWarning` (g/kg)
+- `lipid.warning` / `lipid.highWarning` (g/kg)
+- `gir.warning` / `gir.highWarning` (mg/kg/min)
+- `caPhos.warning` / `caPhos.hard` ([Ca mEq/L + P mmol/L])
+- `peripheralOsmAlertRatio` (fração do limite periférico para aviso antecipado)
 
-## Observações
-- As regras utilizam settings internos e são registadas em `formulation.warnings` e `formulation.errors`.
-- O output PDF lista avisos e erros na “Ficha de Preparação Farmacêutica”.
+Estes limites são inicializados em `DataManager.getSettings()` e podem ser ajustados no objeto de settings local.
 
-## Próximos passos sugeridos
-- Parametrizar limites e regras num ficheiro externo (JSON) com versionamento.
-- Incluir regras adicionais por protocolo institucional.
+## Regras ativas
+1. **Macronutrientes por peso**
+   - Proteína e lípidos acima de limiares emitem avisos graduados.
+2. **GIR**
+   - Aviso/alto aviso para GIR fora de intervalo em adultos não críticos.
+3. **Compatibilidade Ca/P**
+   - Aviso e erro crítico pela soma final de concentrações.
+4. **Osmolaridade por via**
+   - Erro quando ultrapassa limite da via selecionada.
+   - Aviso antecipado para via periférica com margem configurável.
+5. **Diretrizes clínicas por condição**
+   - Regras adicionais renal/hepática/pediátrica/crítico via `applyClinicalGuidelines`.
+
+## Notas de segurança
+- Avisos e erros são registados em `formulation.warnings` e `formulation.errors`.
+- Os mesmos alertas são impressos no worksheet, reforçando validação farmacêutica.
