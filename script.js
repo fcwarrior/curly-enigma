@@ -807,6 +807,8 @@ class NutriSoft {
         document.getElementById('calculate-formulation-btn')?.addEventListener('click', this.calculateFormulation);
         document.getElementById('save-prescription-btn')?.addEventListener('click', this.savePrescription);
         document.getElementById('print-prescription-btn')?.addEventListener('click', () => this.printPrescription(this.currentPrescriptionIndex));
+        document.getElementById('preview-pdf-btn')?.addEventListener('click', () => this.previewPrescriptionPDF(this.currentPrescriptionIndex));
+        document.getElementById('print-labels-btn')?.addEventListener('click', () => this.printLabelsOnly(this.currentPrescriptionIndex));
         document.getElementById('suggest-needs-btn')?.addEventListener('click', () => this.applySuggestedNeeds());
 
         document.getElementById('save-settings-btn')?.addEventListener('click', this.saveSettings);
@@ -883,8 +885,12 @@ class NutriSoft {
                     console.log("Prescription input changed, disabling save/print buttons.");
                     const saveBtn = document.getElementById('save-prescription-btn');
                     const printBtn = document.getElementById('print-prescription-btn');
+                    const previewBtn = document.getElementById('preview-pdf-btn');
+                    const labelsBtn = document.getElementById('print-labels-btn');
                     if (saveBtn) saveBtn.disabled = true;
                     if (printBtn) printBtn.disabled = true;
+                    if (previewBtn) previewBtn.disabled = true;
+                    if (labelsBtn) labelsBtn.disabled = true;
                     if (event.isTrusted && event.target.dataset && event.target.dataset.suggested) {
                         delete event.target.dataset.suggested;
                         event.target.classList.remove('suggested-field');
@@ -2350,6 +2356,8 @@ class NutriSoft {
             document.getElementById('formulation-results')?.classList.add('hidden');
             document.getElementById('save-prescription-btn').disabled = true;
             document.getElementById('print-prescription-btn').disabled = true;
+            document.getElementById('preview-pdf-btn') && (document.getElementById('preview-pdf-btn').disabled = true);
+            document.getElementById('print-labels-btn') && (document.getElementById('print-labels-btn').disabled = true);
             return null;
         }
 
@@ -2820,6 +2828,8 @@ class NutriSoft {
         this.currentPrescriptionIndex = null; 
         document.getElementById('save-prescription-btn').disabled = true;
         document.getElementById('print-prescription-btn').disabled = true;
+            document.getElementById('preview-pdf-btn') && (document.getElementById('preview-pdf-btn').disabled = true);
+            document.getElementById('print-labels-btn') && (document.getElementById('print-labels-btn').disabled = true);
 
         console.log(`NutriSoft.savePrescription: Prescription ${logAction} successful for prep #${preparation.preparationNumber}`);
     }
@@ -2945,6 +2955,8 @@ class NutriSoft {
         document.getElementById('calculate-formulation-btn').disabled = false;
         document.getElementById('save-prescription-btn').disabled = true; 
         document.getElementById('print-prescription-btn').disabled = true; 
+            document.getElementById('preview-pdf-btn') && (document.getElementById('preview-pdf-btn').disabled = true);
+            document.getElementById('print-labels-btn') && (document.getElementById('print-labels-btn').disabled = true);
 
         this.currentPrescriptionIndex = originalIndex; 
         window.location.hash = 'prescription'; 
@@ -3038,62 +3050,179 @@ class NutriSoft {
         this.setInputValue('phosphorus-solution', formulation.electrolytes?.phosphorus?.solution);
         this.setInputValue('prescription-protocol', formulation.protocolId || '');
     }
-    printPrescription(originalIndex = null) { 
-        console.log("NutriSoft.printPrescription: Preparing to print. Original Index:", originalIndex);
+    buildPdfExportContext(originalIndex = null) {
         let formulationToPrint;
-        let prepDetails = { prepNum: 'N/A (Não Salvo)', patientName: 'N/A', date: new Date().toISOString(), map: '' };
+        let prepDetails = { prepNum: 'N/A', patientName: '—', date: new Date().toISOString(), map: '' };
         let logDetails = {};
 
+        if (originalIndex !== null && originalIndex >= 0 && originalIndex < this.prescriptions.length) {
+            const p = this.prescriptions[originalIndex];
+            if (!p?.formulation) throw new Error(`Dados da formulação inválidos para prescrição #${p?.preparationNumber}.`);
+            formulationToPrint = p.formulation;
+            prepDetails = {
+                prepNum: p.preparationNumber,
+                patientName: p.patientName || p.formulation.patient?.name || '—',
+                date: p.date || p.createdAt || new Date().toISOString(),
+                map: p.preparationMap || this.generatePreparationMap(p.formulation)
+            };
+            logDetails = { prepId: prepDetails.prepNum, source: 'history', index: originalIndex };
+        } else {
+            formulationToPrint = this.calculateFormulation();
+            if (!formulationToPrint) {
+                throw new Error('Não foi possível calcular a formulação para exportação PDF.');
+            }
+            if (formulationToPrint.errors?.length > 0) {
+                throw new Error('Formulação contém ERROS CRÍTICOS e não pode ser impressa.');
+            }
+            const nextPrepNumEstimate = (this.dataManager.getData(this.dataManager.preparationCounterKey) || 0) + 1;
+            prepDetails = {
+                prepNum: `(Não Salvo - Est. #${nextPrepNumEstimate})`,
+                patientName: formulationToPrint.patient?.name || '—',
+                date: new Date().toISOString(),
+                map: this.generatePreparationMap(formulationToPrint)
+            };
+            logDetails = { patientId: formulationToPrint.patient?.id, source: 'current_calculation' };
+        }
+
+        return { formulationToPrint, prepDetails, logDetails };
+    }
+
+    validatePdfPayload(formulation, preparationMap, preparationNumber) {
+        const issues = [];
+        if (!formulation || typeof formulation !== 'object') issues.push('Formulação em falta.');
+        if (!preparationNumber) issues.push('Número de preparação em falta.');
+        if (!formulation?.patient) issues.push('Dados do doente em falta.');
+        if (!preparationMap || String(preparationMap).trim().length < 5) issues.push('Mapa de preparação vazio.');
+        return { ok: issues.length === 0, issues };
+    }
+
+    async loadImageAsDataUrl(url) {
+        return new Promise((resolve) => {
+            if (!url) return resolve(null);
+            const img = new Image();
+            img.crossOrigin = 'anonymous';
+            img.onload = () => {
+                try {
+                    const canvas = document.createElement('canvas');
+                    canvas.width = img.naturalWidth || img.width;
+                    canvas.height = img.naturalHeight || img.height;
+                    const ctx = canvas.getContext('2d');
+                    if (!ctx) return resolve(null);
+                    ctx.drawImage(img, 0, 0);
+                    resolve(canvas.toDataURL('image/png'));
+                } catch (err) {
+                    console.warn('Falha ao converter imagem para DataURL:', err);
+                    resolve(null);
+                }
+            };
+            img.onerror = () => resolve(null);
+            img.src = url;
+        });
+    }
+
+    async generateQrDataUrl(text) {
+        return new Promise((resolve) => {
+            try {
+                const canvas = document.createElement('canvas');
+                canvas.width = 180;
+                canvas.height = 180;
+                const ctx = canvas.getContext('2d');
+                if (!ctx) return resolve(null);
+                ctx.fillStyle = '#fff';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                ctx.strokeStyle = '#000';
+                ctx.lineWidth = 4;
+                ctx.strokeRect(4, 4, canvas.width - 8, canvas.height - 8);
+                ctx.fillStyle = '#000';
+                ctx.font = 'bold 14px sans-serif';
+                ctx.fillText('QR', 12, 24);
+                ctx.font = '10px monospace';
+                const payload = String(text || 'N/A').slice(0, 72);
+                const wrapped = payload.match(/.{1,20}/g) || [];
+                wrapped.slice(0, 6).forEach((line, idx) => ctx.fillText(line, 12, 44 + idx * 16));
+                resolve(canvas.toDataURL('image/png'));
+            } catch (err) {
+                console.warn('Falha ao gerar QR fallback:', err);
+                resolve(null);
+            }
+        });
+    }
+
+    async preloadPdfAssets(formulation, preparationNumber, patientName, prescriptionDate) {
+        const qrPayload = JSON.stringify({
+            prep: preparationNumber || 'N/A',
+            patient: patientName || formulation?.patient?.name || '—',
+            date: prescriptionDate || new Date().toISOString(),
+            volume: formulation?.volume ?? null
+        });
+
+        const [logoDataUrl, qrDataUrl] = await Promise.all([
+            this.loadImageAsDataUrl('ULSSMsgtf.jpg'),
+            this.generateQrDataUrl(qrPayload)
+        ]);
+
+        return { logoDataUrl, qrDataUrl, qrPayload };
+    }
+
+    buildLabelPayload(formulation, preparationNumber, patientName, prescriptionDate) {
+        const dt = prescriptionDate ? new Date(prescriptionDate) : new Date();
+        return {
+            prep: preparationNumber || 'N/A',
+            patient: patientName || formulation?.patient?.name || '—',
+            service: formulation?.patient?.service || '—',
+            date: Number.isNaN(dt.getTime()) ? '—' : dt.toLocaleDateString('pt-PT'),
+            time: Number.isNaN(dt.getTime()) ? '—' : dt.toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' }),
+            volume: this.formatValue(formulation?.volume ?? 0, 'ml', 0),
+            route: formulation?.administrationRoute || '—',
+            osm: Number.isFinite(formulation?.osmolarity) ? `${formulation.osmolarity.toFixed(0)} mOsm/L` : 'estimado',
+            energy: this.formatValue(formulation?.energy?.total ?? 0, 'kcal', 0)
+        };
+    }
+
+    async printPrescription(originalIndex = null) {
+        let details;
         try {
-            if (originalIndex !== null && originalIndex >= 0 && originalIndex < this.prescriptions.length) {
-                const p = this.prescriptions[originalIndex];
-                if (!p?.formulation) throw new Error(`Dados da formulação inválidos para prescrição #${p?.preparationNumber}.`);
-                formulationToPrint = p.formulation;
-                prepDetails = {
-                    prepNum: p.preparationNumber,
-                    patientName: p.patientName || p.formulation.patient?.name || 'Desconhecido',
-                    date: p.date || p.createdAt,
-                    map: p.preparationMap || this.generatePreparationMap(p.formulation) 
-                };
-                logDetails = { prepId: prepDetails.prepNum, source: 'history', index: originalIndex };
-                console.log("Printing existing prescription:", prepDetails.prepNum);
-            } else { 
-                console.log("Attempting to print current, unsaved formulation...");
-                formulationToPrint = this.calculateFormulation(); 
-                if (!formulationToPrint) {
-                    this.dataManager.displayNotification('Não foi possível calcular a formulação para impressão. Verifique os dados e tente calcular primeiro.', 'warning');
-                    return;
-                }
-                if (formulationToPrint.errors?.length > 0) {
-                    this.dataManager.displayNotification('Formulação contém ERROS CRÍTICOS e não pode ser impressa. Corrija os erros.', 'error');
-                    return;
-                }
-                const nextPrepNumEstimate = (this.dataManager.getData(this.dataManager.preparationCounterKey) || 0) + 1;
-                prepDetails = {
-                    prepNum: `(Não Salvo - Est. #${nextPrepNumEstimate})`,
-                    patientName: formulationToPrint.patient?.name || 'Desconhecido',
-                    date: new Date().toISOString(), 
-                    map: this.generatePreparationMap(formulationToPrint)
-                };
-                logDetails = { patientId: formulationToPrint.patient?.id, source: 'current_calculation' };
-                console.log("Printing newly calculated, unsaved formulation for patient:", prepDetails.patientName);
-            }
-
-            if (!window.jspdf || !window.jspdf.jsPDF) {
-                console.error("jsPDF library is not loaded. Cannot generate PDF.");
-                this.dataManager.displayNotification("Erro: Biblioteca jsPDF não carregada. PDF não pode ser gerado.", "error");
-                AuditLogger.log('printPrescriptionError', { ...logDetails, error: 'jsPDF not loaded' });
-                return;
-            }
-
+            details = this.buildPdfExportContext(originalIndex);
+            const { formulationToPrint, prepDetails, logDetails } = details;
             AuditLogger.log('printPrescriptionInitiated', logDetails);
-            this.exportPDF(formulationToPrint, prepDetails.map, prepDetails.prepNum, prepDetails.patientName, prepDetails.date);
             this.dataManager.displayNotification('Gerando PDF da prescrição...', 'info');
-
+            await this.exportPDF(formulationToPrint, prepDetails.map, prepDetails.prepNum, prepDetails.patientName, prepDetails.date, { mode: 'save' });
         } catch (error) {
-            console.error("NutriSoft.printPrescription: Error during print preparation:", error);
-            this.dataManager.displayNotification(`Erro ao preparar impressão: ${error.message}. Verifique o console.`, 'error');
-            AuditLogger.log('printPrescriptionError', { ...logDetails, error: error.message, stack: error.stack });
+            console.error('NutriSoft.printPrescription: Error during print preparation:', error);
+            this.dataManager.displayNotification(`Erro ao preparar impressão: ${error.message}.`, 'error');
+            AuditLogger.log('printPrescriptionError', {
+                ...(details?.logDetails || {}),
+                error: error.message,
+                stack: error.stack
+            });
+        }
+    }
+
+    async previewPrescriptionPDF(originalIndex = null) {
+        let details;
+        try {
+            details = this.buildPdfExportContext(originalIndex);
+            const { formulationToPrint, prepDetails, logDetails } = details;
+            AuditLogger.log('previewPDFInitiated', logDetails);
+            await this.exportPDF(formulationToPrint, prepDetails.map, prepDetails.prepNum, prepDetails.patientName, prepDetails.date, { mode: 'preview' });
+        } catch (error) {
+            console.error('NutriSoft.previewPrescriptionPDF:', error);
+            this.dataManager.displayNotification(`Erro na pré-visualização do PDF: ${error.message}.`, 'error');
+            AuditLogger.log('previewPDFError', { ...(details?.logDetails || {}), error: error.message, stack: error.stack });
+        }
+    }
+
+    async printLabelsOnly(originalIndex = null) {
+        let details;
+        try {
+            details = this.buildPdfExportContext(originalIndex);
+            const { formulationToPrint, prepDetails, logDetails } = details;
+            AuditLogger.log('printLabelsInitiated', logDetails);
+            await this.exportLabelsPDF(formulationToPrint, prepDetails.prepNum, prepDetails.patientName, prepDetails.date, { mode: 'save' });
+        } catch (error) {
+            console.error('NutriSoft.printLabelsOnly:', error);
+            this.dataManager.displayNotification(`Erro ao gerar rótulos: ${error.message}.`, 'error');
+            AuditLogger.log('printLabelsError', { ...(details?.logDetails || {}), error: error.message, stack: error.stack });
         }
     }
     deletePrescription(originalIndex) { 
@@ -3189,35 +3318,84 @@ class NutriSoft {
             }
         }
     }
-    exportPDF(formulation, preparationMap, preparationNumber, patientName, prescriptionDate) {
+    async exportPDF(formulation, preparationMap, preparationNumber, patientName, prescriptionDate, options = { mode: 'save' }) {
+        const mode = options?.mode || 'save';
         try {
             if (!window.jspdf || !window.jspdf.jsPDF) {
-                console.error("jsPDF library is not loaded. Cannot generate PDF.");
-                this.dataManager.displayNotification("Erro: Biblioteca jsPDF não carregada.", "error");
-                return;
+                throw new Error('Biblioteca jsPDF não carregada.');
             }
 
+            const validation = this.validatePdfPayload(formulation, preparationMap, preparationNumber);
+            if (!validation.ok) {
+                throw new Error(`Dados insuficientes para PDF: ${validation.issues.join(' | ')}`);
+            }
+
+            const assets = await this.preloadPdfAssets(formulation, preparationNumber, patientName, prescriptionDate);
             const doc = this.createPdfDocument();
 
-            this.generateWorksheetPage(doc, formulation, preparationMap, preparationNumber, patientName, prescriptionDate);
-
-            this.generateLabelsPage(doc, formulation, preparationNumber, patientName, prescriptionDate);
+            this.generateWorksheetPage(doc, formulation, preparationMap, preparationNumber, patientName, prescriptionDate, assets);
+            this.generateLabelsPage(doc, formulation, preparationNumber, patientName, prescriptionDate, assets);
 
             const fileNameSafePatient = (patientName || 'doente').replace(/[^a-z0-9]/gi, '_').toLowerCase();
             const timestamp = new Date().toISOString().split('T')[0];
             const filename = `nutrisoft_${fileNameSafePatient}_prep${preparationNumber}_${timestamp}.pdf`;
-            doc.save(filename);
-            console.log("PDF generated:", filename);
+
+            if (mode === 'preview') {
+                const blobUrl = doc.output('bloburl');
+                window.open(blobUrl, '_blank', 'noopener');
+                this.dataManager.displayNotification('Pré-visualização PDF aberta em nova janela.', 'success');
+            } else {
+                doc.save(filename);
+                this.dataManager.displayNotification('PDF gerado com sucesso.', 'success');
+            }
+            AuditLogger.log('exportPDFSuccess', { prepId: preparationNumber, mode, filename });
         } catch (error) {
-            console.error("NutriSoft.exportPDF: Erro ao gerar PDF:", error);
-            this.dataManager.displayNotification(`Erro ao gerar PDF: ${error.message}. Verifique o console.`, 'error');
-            AuditLogger.log('exportPDFError', { prepId: preparationNumber, error: error.message, stack: error.stack });
+            console.error('NutriSoft.exportPDF: Erro ao gerar PDF:', error);
+            this.dataManager.displayNotification(`Erro ao gerar PDF: ${error.message}.`, 'error');
+            AuditLogger.log('exportPDFError', { prepId: preparationNumber, mode, error: error.message, stack: error.stack });
+            throw error;
+        }
+    }
+
+    async exportLabelsPDF(formulation, preparationNumber, patientName, prescriptionDate, options = { mode: 'save' }) {
+        const mode = options?.mode || 'save';
+        try {
+            if (!window.jspdf || !window.jspdf.jsPDF) throw new Error('Biblioteca jsPDF não carregada.');
+            if (!formulation?.patient) throw new Error('Dados de doente/formulação insuficientes para rótulos.');
+            const assets = await this.preloadPdfAssets(formulation, preparationNumber, patientName, prescriptionDate);
+            const doc = this.createPdfDocument();
+            this.generateLabelsPage(doc, formulation, preparationNumber, patientName, prescriptionDate, assets);
+            const fileNameSafePatient = (patientName || 'doente').replace(/[^a-z0-9]/gi, '_').toLowerCase();
+            const timestamp = new Date().toISOString().split('T')[0];
+            const filename = `nutrisoft_${fileNameSafePatient}_prep${preparationNumber}_${timestamp}_labels.pdf`;
+            if (mode === 'preview') {
+                window.open(doc.output('bloburl'), '_blank', 'noopener');
+            } else {
+                doc.save(filename);
+            }
+            AuditLogger.log('exportLabelsPDFSuccess', { prepId: preparationNumber, mode, filename });
+        } catch (error) {
+            console.error('NutriSoft.exportLabelsPDF:', error);
+            this.dataManager.displayNotification(`Erro ao gerar rótulos: ${error.message}.`, 'error');
+            AuditLogger.log('exportLabelsPDFError', { prepId: preparationNumber, mode, error: error.message, stack: error.stack });
+            throw error;
         }
     }
 
     createPdfDocument() {
         const { jsPDF } = window.jspdf;
-        return new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4' });
+        return new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4', compress: true });
+    }
+
+
+    isPdfDebugEnabled() {
+        try {
+            const fromStorage = localStorage.getItem('nutrisoft_pdf_debug') === '1';
+            const fromQuery = new URLSearchParams(window.location.search).get('pdfDebug') === '1';
+            return fromStorage || fromQuery;
+        } catch {
+            return false;
+        }
     }
 
     pdfEnsureSpace(doc, currentY, requiredHeight) {
@@ -3330,7 +3508,7 @@ class NutriSoft {
         return y;
     }
 
-    generateWorksheetPage(doc, formulation, preparationMap, prepNumber, patientName, prescriptionDate) {
+    generateWorksheetPage(doc, formulation, preparationMap, prepNumber, patientName, prescriptionDate, assets = {}) {
         const margin = PDF_THEME.margins.left;
         const usableWidth = doc.internal.pageSize.getWidth() - PDF_THEME.margins.left - PDF_THEME.margins.right;
         let y = PDF_THEME.margins.top;
@@ -3338,6 +3516,7 @@ class NutriSoft {
         const energy = formulation.energy || {};
         const weight = Number(patient.weight) || 0;
         const headerText = 'Ficha de Preparação Farmacêutica';
+        const pdfDebug = this.isPdfDebugEnabled();
 
         const safeDate = (() => {
             try {
@@ -3349,10 +3528,12 @@ class NutriSoft {
             }
         })();
 
-        try {
-            doc.addImage('ULSSMsgtf.jpg', 'JPEG', PDF_THEME.margins.left, y - 4, 26, 12);
-        } catch (err) {
-            console.warn('Logótipo não carregado no PDF', err);
+        if (assets.logoDataUrl) {
+            try {
+                doc.addImage(assets.logoDataUrl, 'PNG', PDF_THEME.margins.left, y - 4, 26, 12);
+            } catch (err) {
+                console.warn('Logótipo não carregado no PDF', err);
+            }
         }
 
         doc.setFont(PDF_THEME.fonts.family, 'bold');
@@ -3363,6 +3544,10 @@ class NutriSoft {
         y += 14;
 
         const headerBoxHeight = 36;
+        if (pdfDebug) {
+            doc.setDrawColor(200, 90, 90);
+            doc.rect(PDF_THEME.margins.left, PDF_THEME.margins.top, doc.internal.pageSize.getWidth() - PDF_THEME.margins.left - PDF_THEME.margins.right, doc.internal.pageSize.getHeight() - PDF_THEME.margins.top - PDF_THEME.margins.bottom);
+        }
         doc.setDrawColor(...PDF_THEME.palette.border);
         doc.rect(margin, y, usableWidth * 0.68, headerBoxHeight);
         doc.setFont(PDF_THEME.fonts.family, 'normal');
@@ -3650,7 +3835,7 @@ class NutriSoft {
 
         return details.filter(line => line !== null).join('\n');
     }
-    generateLabelsPage(doc, formulation, prepNum, patientName, prescriptionDate) {
+    generateLabelsPage(doc, formulation, prepNum, patientName, prescriptionDate, assets = {}) {
         const template = LABEL_TEMPLATES.main;
         const isTwoBags = (formulation.patient?.weight < 5 && formulation.patient?.condition === 'pediatric') || (formulation.patient?.condition === 'neonate');
         const labels = isTwoBags ? [false, false, true, true] : [false, false, false, false];
@@ -3662,7 +3847,7 @@ class NutriSoft {
             const x = template.pageMarginX + col * (template.width + template.gapX);
             const y = template.pageMarginY + row * (template.height + template.gapY);
             try {
-                this.addLabelContent(doc, formulation, x, y, isLipids, prepNum, patientName, prescriptionDate, template);
+                this.addLabelContent(doc, formulation, x, y, isLipids, prepNum, patientName, prescriptionDate, template, assets);
             } catch (labelError) {
                 console.error('Erro ao renderizar rótulo:', labelError);
                 doc.setDrawColor(...PDF_THEME.palette.border);
@@ -3679,7 +3864,7 @@ class NutriSoft {
         doc.setFontSize(7);
         doc.text('Imprimir a 100% · Validar recorte · Sem fit-to-page', PDF_THEME.margins.left, doc.internal.pageSize.getHeight() - 6);
     }
-    addLabelContent(doc, formulation, startX, startY, isLipidsLabel, preparationNumber, patientName, prescriptionDate, template = LABEL_TEMPLATES.main) {
+    addLabelContent(doc, formulation, startX, startY, isLipidsLabel, preparationNumber, patientName, prescriptionDate, template = LABEL_TEMPLATES.main, assets = {}) {
         const safeArea = template.safeArea || { x: 2, y: 2, w: template.width - 4, h: template.height - 4 };
         const safeStartX = startX + safeArea.x;
         const safeStartY = startY + safeArea.y;
@@ -3687,12 +3872,17 @@ class NutriSoft {
         const safeHeight = safeArea.h;
         const padding = 1.6;
         const lineHeight = (fontSize) => (fontSize * 0.3528) * 1.12;
+        const pdfDebug = this.isPdfDebugEnabled();
 
         doc.setDrawColor(...PDF_THEME.palette.border);
         doc.setLineWidth(0.35);
         doc.rect(startX, startY, template.width, template.height);
         this.pdfDrawSafeArea(doc, template, startX, startY);
         this.pdfCalibrationMarks(doc, template, startX, startY);
+        if (pdfDebug) {
+            doc.setDrawColor(255, 0, 0);
+            doc.rect(safeStartX, safeStartY, safeWidth, safeHeight);
+        }
 
         const qrBox = { w: 17, h: 12 };
         const rightBandW = 16;
@@ -3791,9 +3981,19 @@ class NutriSoft {
         doc.text('DA LUZ', rightX + rightBandW / 2, lightProtectCenterY + 2.8, { align: 'center' });
 
         doc.rect(rightX, splitY + 0.5, qrBox.w, qrBox.h);
-        doc.setFontSize(6.8);
-        doc.setFont(PDF_THEME.fonts.family, 'italic');
-        doc.text('[QR/BC]', rightX + 2.2, splitY + qrBox.h - 1.8);
+        if (assets.qrDataUrl) {
+            try {
+                doc.addImage(assets.qrDataUrl, 'PNG', rightX + 0.6, splitY + 1.1, qrBox.w - 1.2, qrBox.h - 1.8);
+            } catch (qrErr) {
+                doc.setFontSize(6.8);
+                doc.setFont(PDF_THEME.fonts.family, 'italic');
+                doc.text('[QR]', rightX + 4.2, splitY + qrBox.h - 2);
+            }
+        } else {
+            doc.setFontSize(6.8);
+            doc.setFont(PDF_THEME.fonts.family, 'italic');
+            doc.text('[QR/BC]', rightX + 2.2, splitY + qrBox.h - 1.8);
+        }
 
         doc.setDrawColor(...PDF_THEME.palette.subtleBorder);
         doc.line(leftX, splitY, leftX + leftW, splitY);
