@@ -62,6 +62,18 @@ function roundVolume(value, decimalPlaces = 1) {
     return Math.round(parsed * factor) / factor;
 }
 
+
+function normalizeAdministrationRoute(routeValue) {
+    const normalized = String(routeValue || '').toLowerCase().trim();
+    if (['peripheral', 'periférica', 'periferica'].includes(normalized)) return 'peripheral';
+    if (['central'].includes(normalized)) return 'central';
+    return 'central';
+}
+
+function routeLabel(routeValue) {
+    return normalizeAdministrationRoute(routeValue) === 'peripheral' ? 'Periférica' : 'Central';
+}
+
 /**
  * Shared PDF layout tokens to keep worksheet and labels consistent and maintainable.
  */
@@ -2394,12 +2406,14 @@ class NutriSoft {
 
         try {
             const protocolId = document.getElementById('prescription-protocol')?.value || '';
+            const normalizedRoute = normalizeAdministrationRoute(administrationRoute);
             const formulation = {
                 patient: patient,
                 protocolId: protocolId,
                 volume: totalVolume, // Prescribed total volume
                 infusionHours: infusionHours,
-                route: administrationRoute,
+                route: normalizedRoute,
+                administrationRoute: routeLabel(normalizedRoute),
                 proteins: this.calculateProteins(patient),
                 glucose: this.calculateGlucose(patient, infusionHours),
                 lipids: this.calculateLipids(patient),
@@ -2408,7 +2422,15 @@ class NutriSoft {
                 osmolarity: 0,
                 compatibility: '',
                 warnings: [], 
-                errors: []    
+                errors: [],
+                preparationMeta: {
+                    batch: document.getElementById('prep-batch')?.value?.trim() || '—',
+                    preparer: document.getElementById('prep-operator')?.value?.trim() || this.userName || '—',
+                    checker: document.getElementById('check-operator')?.value?.trim() || '—',
+                    budHours: parseNum(document.getElementById('bud-hours')?.value, 24),
+                    storage: document.getElementById('storage-conditions')?.value?.trim() || 'Conservar 2–8°C. Proteger da luz.',
+                    photoprotection: !!document.getElementById('requires-photoprotection')?.checked
+                }
             };
 
             formulation.glutamine = this.calculateGlutamine(patient, formulation.proteins);
@@ -2455,10 +2477,14 @@ class NutriSoft {
 
             const saveBtn = document.getElementById('save-prescription-btn');
             const printBtn = document.getElementById('print-prescription-btn');
+            const previewBtn = document.getElementById('preview-pdf-btn');
+            const labelsBtn = document.getElementById('print-labels-btn');
             const hasCriticalErrors = formulation.errors && formulation.errors.length > 0;
 
             if (saveBtn) saveBtn.disabled = hasCriticalErrors;
             if (printBtn) printBtn.disabled = hasCriticalErrors;
+            if (previewBtn) previewBtn.disabled = hasCriticalErrors;
+            if (labelsBtn) labelsBtn.disabled = hasCriticalErrors;
 
             AuditLogger.log('calculateFormulationSuccess', { patientId: patient.id, prepVolume: totalVolume, errors: formulation.errors.length, warnings: formulation.warnings.length });
             console.log("NutriSoft.calculateFormulation: Formulation calculated:", JSON.parse(JSON.stringify(formulation))); 
@@ -2638,7 +2664,7 @@ class NutriSoft {
         const metricsBlock = `
             <div class="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs mt-4">
                 <div class="metric-card"><span class="metric-label">Osmolaridade</span><span class="metric-value">${this.formatValue(formulation.osmolarity, 'mOsm/L', 0)}</span></div>
-                <div class="metric-card"><span class="metric-label">Via</span><span class="metric-value">${formulation.route === 'peripheral' ? 'Periférica' : 'Central'}</span></div>
+                <div class="metric-card"><span class="metric-label">Via</span><span class="metric-value">${routeLabel(formulation.route)}</span></div>
                 <div class="metric-card"><span class="metric-label">Energia/kg</span><span class="metric-value">${weight > 0 ? `${energy.perKg.toFixed(1)} kcal/kg` : '---'}</span></div>
             </div>
         `;
@@ -3005,7 +3031,7 @@ class NutriSoft {
         this.setInputValue('prescription-patient', patientId);
         this.setInputValue('total-volume', formulation.volume);
         this.setInputValue('infusion-hours', formulation.infusionHours ?? 24);
-        this.setInputValue('administration-route', formulation.route || 'central');
+        this.setInputValue('administration-route', normalizeAdministrationRoute(formulation.route || formulation.administrationRoute));
 
         if (patientWeight > 0) {
             this.setInputValue('protein-needs', (formulation.proteins?.required / patientWeight).toFixed(2));
@@ -3123,26 +3149,39 @@ class NutriSoft {
     async generateQrDataUrl(text) {
         return new Promise((resolve) => {
             try {
-                const canvas = document.createElement('canvas');
-                canvas.width = 180;
-                canvas.height = 180;
-                const ctx = canvas.getContext('2d');
-                if (!ctx) return resolve(null);
-                ctx.fillStyle = '#fff';
-                ctx.fillRect(0, 0, canvas.width, canvas.height);
-                ctx.strokeStyle = '#000';
-                ctx.lineWidth = 4;
-                ctx.strokeRect(4, 4, canvas.width - 8, canvas.height - 8);
-                ctx.fillStyle = '#000';
-                ctx.font = 'bold 14px sans-serif';
-                ctx.fillText('QR', 12, 24);
-                ctx.font = '10px monospace';
-                const payload = String(text || 'N/A').slice(0, 72);
-                const wrapped = payload.match(/.{1,20}/g) || [];
-                wrapped.slice(0, 6).forEach((line, idx) => ctx.fillText(line, 12, 44 + idx * 16));
-                resolve(canvas.toDataURL('image/png'));
+                if (typeof QRCode === 'undefined') {
+                    resolve(null);
+                    return;
+                }
+                const wrapper = document.createElement('div');
+                wrapper.style.position = 'fixed';
+                wrapper.style.left = '-10000px';
+                wrapper.style.top = '-10000px';
+                document.body.appendChild(wrapper);
+
+                new QRCode(wrapper, {
+                    text: String(text || ''),
+                    width: 180,
+                    height: 180,
+                    correctLevel: QRCode.CorrectLevel.M
+                });
+
+                setTimeout(() => {
+                    try {
+                        const canvas = wrapper.querySelector('canvas');
+                        const img = wrapper.querySelector('img');
+                        let data = null;
+                        if (canvas?.toDataURL) data = canvas.toDataURL('image/png');
+                        else if (img?.src) data = img.src;
+                        wrapper.remove();
+                        resolve(data || null);
+                    } catch (innerErr) {
+                        wrapper.remove();
+                        resolve(null);
+                    }
+                }, 25);
             } catch (err) {
-                console.warn('Falha ao gerar QR fallback:', err);
+                console.warn('Falha ao gerar QR:', err);
                 resolve(null);
             }
         });
@@ -3175,7 +3214,9 @@ class NutriSoft {
             volume: this.formatValue(formulation?.volume ?? 0, 'ml', 0),
             route: formulation?.administrationRoute || '—',
             osm: Number.isFinite(formulation?.osmolarity) ? `${formulation.osmolarity.toFixed(0)} mOsm/L` : 'estimado',
-            energy: this.formatValue(formulation?.energy?.total ?? 0, 'kcal', 0)
+            energy: this.formatValue(formulation?.energy?.total ?? 0, 'kcal', 0),
+            batch: formulation?.preparationMeta?.batch || '—',
+            budHours: parseNum(formulation?.preparationMeta?.budHours, 24)
         };
     }
 
@@ -3334,7 +3375,7 @@ class NutriSoft {
             const doc = this.createPdfDocument();
 
             this.generateWorksheetPage(doc, formulation, preparationMap, preparationNumber, patientName, prescriptionDate, assets);
-            this.generateLabelsPage(doc, formulation, preparationNumber, patientName, prescriptionDate, assets);
+            this.generateLabelsPage(doc, formulation, preparationNumber, patientName, prescriptionDate, assets, { appendPage: true });
 
             const fileNameSafePatient = (patientName || 'doente').replace(/[^a-z0-9]/gi, '_').toLowerCase();
             const timestamp = new Date().toISOString().split('T')[0];
@@ -3364,7 +3405,7 @@ class NutriSoft {
             if (!formulation?.patient) throw new Error('Dados de doente/formulação insuficientes para rótulos.');
             const assets = await this.preloadPdfAssets(formulation, preparationNumber, patientName, prescriptionDate);
             const doc = this.createPdfDocument();
-            this.generateLabelsPage(doc, formulation, preparationNumber, patientName, prescriptionDate, assets);
+            this.generateLabelsPage(doc, formulation, preparationNumber, patientName, prescriptionDate, assets, { appendPage: false });
             const fileNameSafePatient = (patientName || 'doente').replace(/[^a-z0-9]/gi, '_').toLowerCase();
             const timestamp = new Date().toISOString().split('T')[0];
             const filename = `nutrisoft_${fileNameSafePatient}_prep${preparationNumber}_${timestamp}_labels.pdf`;
@@ -3556,7 +3597,7 @@ class NutriSoft {
             [`#Prep: ${prepNumber}`, `Data: ${safeDate}`],
             [`Paciente: ${patientName || '---'}`, `Processo: ${patient.processNumber || patient.admissionNumber || '---'}`],
             [`Condição: ${patient.condition || '---'}`, `Médico: ${patient.physician || '---'}`],
-            [`Peso: ${this.formatValue(patient.weight, 'kg', 1)}`, `Via: ${formulation.route === 'peripheral' ? 'Periférica' : 'Central'}`]
+            [`Peso: ${this.formatValue(patient.weight, 'kg', 1)}`, `Via: ${routeLabel(formulation.route)}`]
         ];
         let infoY = y + 6;
         headerLines.forEach(line => {
@@ -3702,6 +3743,21 @@ class NutriSoft {
         });
         y = propY + Math.ceil(properties.length / 2) * 7 + 8;
 
+        const prepMeta = formulation.preparationMeta || {};
+        const qualityRows = [
+            ['Lote Interno', prepMeta.batch || '—'],
+            ['Preparador', prepMeta.preparer || '—'],
+            ['Conferente', prepMeta.checker || '—'],
+            ['BUD', `${parseNum(prepMeta.budHours, 24)} h`],
+            ['Conservação', prepMeta.storage || 'Conservar 2–8°C.'],
+            ['Fotoproteção', prepMeta.photoprotection ? 'Sim' : 'Não']
+        ];
+        doc.setFont(PDF_THEME.fonts.family, 'bold');
+        doc.setFontSize(PDF_THEME.fonts.section);
+        doc.text('Controlo e Rastreabilidade', margin, y - 2);
+        y = this.pdfDrawTable(doc, margin, y, ['Campo', 'Valor'], qualityRows, [45, usableWidth - 45], { rowHeight: 7 });
+        y += 4;
+
         if (preparationMap) {
             const ensured = this.pdfEnsureSpace(doc, y, 30);
             y = ensured.y;
@@ -3781,7 +3837,7 @@ class NutriSoft {
         };
 
         details.push(`- Volume Total Prescrito: ${this.formatValue(formulation.volume, 'ml', 0)}`);
-        details.push(`- Via de Administração: ${formulation.route === 'peripheral' ? 'Periférica' : 'Central'}`);
+        details.push(`- Via de Administração: ${routeLabel(formulation.route)}`);
         details.push(`- Osmolaridade Calculada: ${this.formatValue(formulation.osmolarity, 'mOsm/L', 0)}`);
         details.push(''); 
 
@@ -3835,11 +3891,12 @@ class NutriSoft {
 
         return details.filter(line => line !== null).join('\n');
     }
-    generateLabelsPage(doc, formulation, prepNum, patientName, prescriptionDate, assets = {}) {
+    generateLabelsPage(doc, formulation, prepNum, patientName, prescriptionDate, assets = {}, options = {}) {
         const template = LABEL_TEMPLATES.main;
         const isTwoBags = (formulation.patient?.weight < 5 && formulation.patient?.condition === 'pediatric') || (formulation.patient?.condition === 'neonate');
         const labels = isTwoBags ? [false, false, true, true] : [false, false, false, false];
-        doc.addPage();
+        const appendPage = options?.appendPage !== false;
+        if (appendPage) doc.addPage();
         labels.forEach((isLipids, idx) => {
             if (idx > 0 && idx % 4 === 0) doc.addPage();
             const col = idx % 2;
@@ -3929,7 +3986,7 @@ class NutriSoft {
         const metaRows = [
             ['Data', `${dtDate} ${dtTime}`],
             ['Volume', `${this.formatValue(bagVol, 'ml', 0)}`],
-            ['Via', `${formulation.administrationRoute || 'N/D'}`],
+            ['Via', `${routeLabel(formulation.route || formulation.administrationRoute)}`],
             ['Infusão', infusion],
             ['Osm', osm]
         ];
@@ -3946,10 +4003,12 @@ class NutriSoft {
             y += lineHeight(7.1);
         });
 
+        const prepMeta = formulation.preparationMeta || {};
         const nutrientRows = [
             ['Azoto', this.formatValue(formulation.proteins?.required ?? 0, 'g', 2)],
             ['Glicose', this.formatValue(formulation.glucose?.required ?? 0, 'g', 1)],
             ['Sódio', this.formatValue(formulation.electrolytes?.sodium?.displayRequired ?? 0, 'mEq', 1)],
+            ['Lote', prepMeta.batch || '—'],
             ['Cal. Totais', this.formatValue(formulation.energy?.total ?? 0, 'kcal', 0)]
         ];
 
@@ -3992,7 +4051,7 @@ class NutriSoft {
         } else {
             doc.setFontSize(6.8);
             doc.setFont(PDF_THEME.fonts.family, 'italic');
-            doc.text('[QR/BC]', rightX + 2.2, splitY + qrBox.h - 1.8);
+            doc.text('[QR indisponível]', rightX + 0.8, splitY + qrBox.h - 1.8);
         }
 
         doc.setDrawColor(...PDF_THEME.palette.subtleBorder);
@@ -4000,7 +4059,8 @@ class NutriSoft {
         doc.setFont(PDF_THEME.fonts.family, 'italic');
         doc.setFontSize(6.5);
         doc.text('Ass. Preparador: ___________  Ass. Revisor: ___________', leftX, splitY + 3.3, { maxWidth: leftW });
-        doc.text('Conservar 2–8°C · Uso IV · Sem fit-to-page', leftX, splitY + 6.2, { maxWidth: leftW });
+        const storageLine = prepMeta.storage || 'Conservar 2–8°C · Uso IV';
+        doc.text(`${storageLine} · Sem fit-to-page`, leftX, splitY + 6.2, { maxWidth: leftW });
     }
     showAuditLogsModal() { 
         const modal = document.getElementById('audit-logs-modal');

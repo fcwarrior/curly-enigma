@@ -8,6 +8,7 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- jsPDF library for PDF generation -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" defer></script>
+    <script src="vendor/qrcode.min.js" defer></script>
     <!-- Chart.js library for charts -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js" defer></script>
     <!-- Font Awesome for icons -->
@@ -402,6 +403,38 @@
                             <p id="carnitine-needs-error" class="error-message hidden text-sm" aria-live="polite"></p>
                         </div>
                          <!-- Add selects for additive solutions if needed, or let JS use defaults -->
+                    </div>
+                </fieldset>
+
+                <fieldset class="mb-6 p-4 bg-gray-50 rounded-md border border-gray-200">
+                    <legend class="text-lg font-semibold mb-3 text-gray-800 px-2">Rastreabilidade da Preparação</legend>
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div>
+                            <label for="prep-batch" class="block text-sm font-medium text-gray-700">Lote interno da preparação</label>
+                            <input type="text" id="prep-batch" class="input-field mt-1" placeholder="Ex: NP-2026-0001">
+                        </div>
+                        <div>
+                            <label for="prep-operator" class="block text-sm font-medium text-gray-700">Preparador</label>
+                            <input type="text" id="prep-operator" class="input-field mt-1" placeholder="Nome do operador">
+                        </div>
+                        <div>
+                            <label for="check-operator" class="block text-sm font-medium text-gray-700">Conferente</label>
+                            <input type="text" id="check-operator" class="input-field mt-1" placeholder="Nome do conferente">
+                        </div>
+                        <div>
+                            <label for="bud-hours" class="block text-sm font-medium text-gray-700">BUD (horas)</label>
+                            <input type="number" id="bud-hours" class="input-field mt-1" min="1" step="1" value="24">
+                        </div>
+                        <div>
+                            <label for="storage-conditions" class="block text-sm font-medium text-gray-700">Condições de conservação</label>
+                            <input type="text" id="storage-conditions" class="input-field mt-1" value="Conservar 2–8°C. Proteger da luz.">
+                        </div>
+                        <div class="flex items-end pb-2">
+                            <label class="inline-flex items-center gap-2 text-sm font-medium text-gray-700">
+                                <input type="checkbox" id="requires-photoprotection" class="h-4 w-4" checked>
+                                Requer fotoproteção
+                            </label>
+                        </div>
                     </div>
                 </fieldset>
 
