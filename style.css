@@ -355,6 +355,49 @@ tbody tr:hover:not(.no-results-row) { /* Don't apply hover to no-results row */
 #formulation-warnings li { color: #b45309; /* amber-700 */ } /* Ensure list items in warnings also have color */
 #formulation-errors li { color: #b91c1c; /* red-700 */ } /* Ensure list items in errors also have color */
 
+.compatibility-panel {
+    display: grid;
+    gap: 0.5rem;
+}
+
+.compatibility-panel__graph {
+    border: 1px solid #e5e7eb;
+    border-radius: 0.5rem;
+    padding: 0.6rem 0.75rem;
+    background: #fff;
+}
+
+.compatibility-panel__title {
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: #374151;
+}
+
+.compatibility-panel__values,
+.compatibility-panel__limits {
+    display: flex;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+    font-size: 0.75rem;
+    color: #4b5563;
+}
+
+.compatibility-panel__bar-wrap {
+    height: 0.55rem;
+    border-radius: 999px;
+    background: #e5e7eb;
+    overflow: hidden;
+}
+
+.compatibility-panel__bar {
+    height: 100%;
+    border-radius: 999px;
+}
+
+.compat-risk-low { background: #16a34a; }
+.compat-risk-moderate { background: #f59e0b; }
+.compat-risk-high { background: #dc2626; }
+
 
 /* --- Modals --- */
 /* Basic modal structure is defined by Tailwind classes in HTML */

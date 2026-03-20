@@ -74,6 +74,16 @@ function routeLabel(routeValue) {
     return normalizeAdministrationRoute(routeValue) === 'peripheral' ? 'Periférica' : 'Central';
 }
 
+function hashString(input) {
+    const text = String(input || '');
+    let hash = 2166136261;
+    for (let i = 0; i < text.length; i++) {
+        hash ^= text.charCodeAt(i);
+        hash += (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24);
+    }
+    return hash >>> 0;
+}
+
 /**
  * Shared PDF layout tokens to keep worksheet and labels consistent and maintainable.
  */
@@ -2494,6 +2504,43 @@ class NutriSoft {
         }
         return isNaN(finalOsmolarity) || !isFinite(finalOsmolarity) ? 0 : finalOsmolarity;
     }
+
+    calculateCaPhosProfile(formulation) {
+        const totalVolumePrescription = parseNum(formulation?.volume, 0);
+        const validation = this.settings?.clinicalValidation || {};
+        const caPhosLimits = validation.caPhos || { warning: 30, hard: 45 };
+
+        const ca = formulation?.electrolytes?.calcium;
+        const phos = formulation?.electrolytes?.phosphorus;
+        const caSol = ca?.solution ? this.solutions[ca.solution] : null;
+        const phosSol = phos?.solution ? this.solutions[phos.solution] : null;
+
+        let calciumConc = 0;
+        if (ca?.volume > 0 && caSol?.calcium_concentration && totalVolumePrescription > 0) {
+            calciumConc = (ca.volume * (caSol.calcium_concentration / 1000)) / (totalVolumePrescription / 1000);
+        }
+
+        let phosphorusConc = 0;
+        if (phos?.volume > 0 && phosSol?.phosphorus_concentration && totalVolumePrescription > 0) {
+            phosphorusConc = (phos.volume * (phosSol.phosphorus_concentration / 1000)) / (totalVolumePrescription / 1000);
+        }
+
+        const sum = calciumConc + phosphorusConc;
+        const hasData = calciumConc > 0 && phosphorusConc > 0;
+        let risk = 'low';
+        if (hasData && sum > caPhosLimits.hard) risk = 'high';
+        else if (hasData && sum > caPhosLimits.warning) risk = 'moderate';
+
+        return {
+            calciumConc,
+            phosphorusConc,
+            sum,
+            limits: caPhosLimits,
+            hasData,
+            risk
+        };
+    }
+
     validateFormulationAdvanced(formulation, errors = [], warnings = []) { 
         const patient = formulation.patient;
         const totalVolumePrescription = formulation.volume || 0;
@@ -2529,25 +2576,10 @@ class NutriSoft {
         else if (lipid_g_kg > lipidLimits.warning) warnings.push(`Dose de Lípidos (${lipid_g_kg.toFixed(1)} g/kg) elevada. Monitorizar triglicerídeos.`);
 
 
-        const ca = formulation.electrolytes?.calcium;
-        const phos = formulation.electrolytes?.phosphorus;
-        const caSol = ca?.solution ? this.solutions[ca.solution] : null;
-        const phosSol = phos?.solution ? this.solutions[phos.solution] : null;
-
-        let caConcFinal_mEq_L = 0;
-        if (ca?.volume > 0 && caSol?.calcium_concentration && totalVolumePrescription > 0) {
-            caConcFinal_mEq_L = (ca.volume * (caSol.calcium_concentration / 1000)) / (totalVolumePrescription / 1000);
-        }
-
-        let phosConcFinal_mmol_L = 0;
-        if (phos?.volume > 0 && phosSol?.phosphorus_concentration && totalVolumePrescription > 0) {
-            phosConcFinal_mmol_L = (phos.volume * (phosSol.phosphorus_concentration / 1000)) / (totalVolumePrescription / 1000);
-        }
-
-        const caPhosSum = caConcFinal_mEq_L + phosConcFinal_mmol_L; 
-        if (caConcFinal_mEq_L > 0 && phosConcFinal_mmol_L > 0) { 
-            if (caPhosSum > caPhosLimits.hard) errors.push(`Risco Elevado de Precipitação Ca/P: Soma [Ca(mEq/L)+P(mmol/L)] = ${caPhosSum.toFixed(1)} > ${caPhosLimits.hard}. Consultar curvas de compatibilidade.`);
-            else if (caPhosSum > caPhosLimits.warning) warnings.push(`Atenção Risco Precipitação Ca/P: Soma [Ca(mEq/L)+P(mmol/L)] = ${caPhosSum.toFixed(1)} > ${caPhosLimits.warning}. Considerar ordem de adição e tipo de AA.`);
+        const caPhosProfile = this.calculateCaPhosProfile(formulation);
+        if (caPhosProfile.hasData) { 
+            if (caPhosProfile.sum > caPhosLimits.hard) errors.push(`Risco Elevado de Precipitação Ca/P: Soma [Ca(mEq/L)+P(mmol/L)] = ${caPhosProfile.sum.toFixed(1)} > ${caPhosLimits.hard}. Consultar curvas de compatibilidade.`);
+            else if (caPhosProfile.sum > caPhosLimits.warning) warnings.push(`Atenção Risco Precipitação Ca/P: Soma [Ca(mEq/L)+P(mmol/L)] = ${caPhosProfile.sum.toFixed(1)} > ${caPhosLimits.warning}. Considerar ordem de adição e tipo de AA.`);
         }
 
         const osmLimits = this.settings.osmolarityLimits || { peripheral: 900, central: 1500 };
@@ -2734,7 +2766,7 @@ class NutriSoft {
         if (compDetails && compatResults && formWarnings && formErrors && resultsSection) {
             try {
                 compDetails.innerHTML = this.formatCompositionDetails(formulation);
-                compatResults.innerHTML = `<p><strong>Compatibilidade e Estabilidade (Aviso):</strong> ${formulation.compatibility || 'N/A - Consultar literatura e protocolo local.'}</p>`;
+                compatResults.innerHTML = this.renderCompatibilityPanel(formulation);
                 formWarnings.innerHTML = this.formatFormulationWarnings(formulation.warnings);
                 formErrors.innerHTML = this.formatFormulationErrors(formulation.errors);
 
@@ -2752,6 +2784,40 @@ class NutriSoft {
             console.error('displayResults: One or more results display elements not found in DOM.');
         }
     }
+
+    renderCompatibilityPanel(formulation) {
+        const profile = this.calculateCaPhosProfile(formulation);
+        const statusText = formulation.compatibility || 'N/A - Consultar literatura e protocolo local.';
+        if (!profile.hasData) {
+            return `<p><strong>Compatibilidade e Estabilidade (Aviso):</strong> ${statusText}</p>`;
+        }
+
+        const hardLimit = Math.max(profile.limits.hard, 1);
+        const ratio = Math.min(1, profile.sum / hardLimit);
+        const widthPct = Math.round(ratio * 100);
+        const riskClass = profile.risk === 'high' ? 'compat-risk-high' : profile.risk === 'moderate' ? 'compat-risk-moderate' : 'compat-risk-low';
+        return `
+            <div class="compatibility-panel">
+                <p><strong>Compatibilidade e Estabilidade (Aviso):</strong> ${statusText}</p>
+                <div class="compatibility-panel__graph">
+                    <div class="compatibility-panel__title">Indicador Ca/P (mEq/L + mmol/L)</div>
+                    <div class="compatibility-panel__values">
+                        <span>Ca: ${profile.calciumConc.toFixed(1)}</span>
+                        <span>P: ${profile.phosphorusConc.toFixed(1)}</span>
+                        <span>Soma: ${profile.sum.toFixed(1)}</span>
+                    </div>
+                    <div class="compatibility-panel__bar-wrap">
+                        <div class="compatibility-panel__bar ${riskClass}" style="width: ${widthPct}%"></div>
+                    </div>
+                    <div class="compatibility-panel__limits">
+                        <span>Aviso &gt; ${profile.limits.warning}</span>
+                        <span>Limite duro &gt; ${profile.limits.hard}</span>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
     formatValue(value, unit = '', decimalPlaces = 2) { 
         if (value === undefined || value === null || isNaN(value) || !isFinite(value)) return `--- ${unit}`; 
         return `${Number(value).toFixed(decimalPlaces)} ${unit}`;
@@ -3378,7 +3444,7 @@ class NutriSoft {
         return new Promise((resolve) => {
             try {
                 if (typeof QRCode === 'undefined') {
-                    resolve(null);
+                    resolve(this.generateFallbackCodeDataUrl(text));
                     return;
                 }
                 const wrapper = document.createElement('div');
@@ -3410,9 +3476,49 @@ class NutriSoft {
                 }, 25);
             } catch (err) {
                 console.warn('Falha ao gerar QR:', err);
-                resolve(null);
+                resolve(this.generateFallbackCodeDataUrl(text));
             }
         });
+    }
+
+    generateFallbackCodeDataUrl(text) {
+        try {
+            const payload = String(text || '');
+            const size = 180;
+            const canvas = document.createElement('canvas');
+            canvas.width = size;
+            canvas.height = size;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) return null;
+
+            ctx.fillStyle = '#FFFFFF';
+            ctx.fillRect(0, 0, size, size);
+            ctx.fillStyle = '#111827';
+
+            const seed = hashString(payload);
+            const cellSize = 10;
+            const cells = 14;
+            const start = 20;
+
+            for (let row = 0; row < cells; row++) {
+                for (let col = 0; col < cells; col++) {
+                    const bitIdx = (row * cells + col) % 31;
+                    const bit = (seed >> bitIdx) & 1;
+                    if (bit || row === 0 || col === 0 || row === cells - 1 || col === cells - 1) {
+                        ctx.fillRect(start + col * cellSize, start + row * cellSize, cellSize - 1, cellSize - 1);
+                    }
+                }
+            }
+
+            ctx.fillStyle = '#374151';
+            ctx.font = '11px sans-serif';
+            ctx.fillText('ID', 8, size - 18);
+            ctx.fillText(payload.slice(0, 18), 24, size - 18);
+            return canvas.toDataURL('image/png');
+        } catch (error) {
+            console.warn('Falha no código fallback:', error);
+            return null;
+        }
     }
 
     async preloadPdfAssets(formulation, preparationNumber, patientName, prescriptionDate) {
