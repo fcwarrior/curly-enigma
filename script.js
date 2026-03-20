@@ -241,7 +241,77 @@ class DataManager {
         this.userNameKey = 'userName';
         this.auditLogsKey = 'auditLogs';
         this.lotsKey = 'lots';
+        this.dbName = 'nutrisoftDB';
+        this.dbVersion = 1;
+        this.storeName = 'kv';
+        this.memoryStore = {};
+        this.dbReady = this.initIndexedDB();
         console.log("DataManager instance created.");
+    }
+
+    initIndexedDB() {
+        return new Promise((resolve) => {
+            if (!('indexedDB' in window)) return resolve(false);
+            try {
+                const req = indexedDB.open(this.dbName, this.dbVersion);
+                req.onupgradeneeded = () => {
+                    const db = req.result;
+                    if (!db.objectStoreNames.contains(this.storeName)) {
+                        db.createObjectStore(this.storeName, { keyPath: 'key' });
+                    }
+                };
+                req.onsuccess = async () => {
+                    this.db = req.result;
+                    await this.loadIndexedDbSnapshot();
+                    await this.migrateLocalStorageToIndexedDB();
+                    resolve(true);
+                };
+                req.onerror = () => resolve(false);
+            } catch {
+                resolve(false);
+            }
+        });
+    }
+
+    async loadIndexedDbSnapshot() {
+        if (!this.db) return;
+        await new Promise((resolve) => {
+            const tx = this.db.transaction(this.storeName, 'readonly');
+            const store = tx.objectStore(this.storeName);
+            const req = store.getAll();
+            req.onsuccess = () => {
+                (req.result || []).forEach(entry => {
+                    this.memoryStore[entry.key] = entry.value;
+                });
+                resolve();
+            };
+            req.onerror = () => resolve();
+        });
+    }
+
+    async migrateLocalStorageToIndexedDB() {
+        const keys = [this.patientsKey, this.prescriptionsKey, this.solutionsKey, this.preparationCounterKey, this.settingsKey, this.userNameKey, this.auditLogsKey, this.lotsKey];
+        keys.forEach((key) => {
+            const localValue = localStorage.getItem(key);
+            if (localValue && this.memoryStore[key] === undefined) {
+                try {
+                    this.memoryStore[key] = JSON.parse(localValue);
+                    this.persistToIndexedDB(key, this.memoryStore[key]);
+                } catch {
+                    // ignore malformed
+                }
+            }
+        });
+    }
+
+    persistToIndexedDB(key, value) {
+        if (!this.db) return;
+        try {
+            const tx = this.db.transaction(this.storeName, 'readwrite');
+            tx.objectStore(this.storeName).put({ key, value, updatedAt: new Date().toISOString() });
+        } catch (error) {
+            console.warn('IndexedDB persist failed:', error);
+        }
     }
 
     /**
@@ -254,8 +324,10 @@ class DataManager {
             const rawData = localStorage.getItem(key);
             if (rawData) {
                 const parsedData = JSON.parse(rawData);
+                this.memoryStore[key] = parsedData;
                 return parsedData;
             }
+            if (this.memoryStore[key] !== undefined) return this.memoryStore[key];
             return null;
         } catch (error) {
             console.error(`DataManager: Error getting data for key '${key}':`, error);
@@ -273,6 +345,8 @@ class DataManager {
         try {
             const jsonData = JSON.stringify(data, null, 2);
             localStorage.setItem(key, jsonData);
+            this.memoryStore[key] = data;
+            this.persistToIndexedDB(key, data);
             console.log(`DataManager.saveData: Data for key '${key}' successfully saved to localStorage.`);
         } catch (error) {
             console.error(`DataManager: Error saving data for key '${key}':`, error);
@@ -911,6 +985,9 @@ class NutriSoft {
         document.getElementById('save-solution-btn')?.addEventListener('click', this.saveSolution);
         document.getElementById('add-lot-btn')?.addEventListener('click', this.addLot);
         document.getElementById('lots-list')?.addEventListener('click', this.handleLotAction);
+        document.getElementById('lots-search-input')?.addEventListener('input', () => this.renderLots());
+        document.getElementById('lots-filter-solution')?.addEventListener('change', () => this.renderLots());
+        document.getElementById('lots-filter-status')?.addEventListener('change', () => this.renderLots());
 
         document.getElementById('cancel-solution-btn')?.addEventListener('click', () => this.clearSolutionForm(true)); 
         document.getElementById('solution-type')?.addEventListener('change', (event) => {
@@ -1276,11 +1353,19 @@ class NutriSoft {
     renderLots() {
         const tbody = document.getElementById('lots-list');
         const solutionSelect = document.getElementById('lot-solution-name');
+        const solutionFilter = document.getElementById('lots-filter-solution');
+        const statusFilter = document.getElementById('lots-filter-status');
+        const searchInput = document.getElementById('lots-search-input');
         if (!tbody) return;
 
         if (solutionSelect) {
             const names = Object.keys(this.solutions).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
             solutionSelect.innerHTML = names.map(name => `<option value="${name}">${name}</option>`).join('');
+            if (solutionFilter) {
+                const currentValue = solutionFilter.value;
+                solutionFilter.innerHTML = `<option value="">Todas as soluções</option>` + names.map(name => `<option value="${name}">${name}</option>`).join('');
+                solutionFilter.value = names.includes(currentValue) ? currentValue : '';
+            }
         }
 
         const noResultsRowTemplate = tbody.querySelector('.no-results-row');
@@ -1294,21 +1379,65 @@ class NutriSoft {
         }
         noResultsRow?.classList.add('hidden');
 
-        const sorted = [...this.lots].sort((a, b) => (a.expiry || '').localeCompare(b.expiry || ''));
+        const q = (searchInput?.value || '').trim().toLowerCase();
+        const selectedSolution = solutionFilter?.value || '';
+        const selectedStatus = statusFilter?.value || '';
+        const filtered = this.lots.filter(lot => {
+            const computedStatus = this.computeLotStatus(lot);
+            if (selectedSolution && lot.solutionName !== selectedSolution) return false;
+            if (selectedStatus && computedStatus !== selectedStatus) return false;
+            if (!q) return true;
+            const haystack = [
+                lot.solutionName,
+                lot.lotNumber,
+                lot.manufacturer,
+                lot.notes,
+                lot.expiry
+            ].join(' ').toLowerCase();
+            return haystack.includes(q);
+        });
+
+        const sorted = [...filtered].sort((a, b) => (a.expiry || '').localeCompare(b.expiry || ''));
+        if (!sorted.length) {
+            noResultsRow?.classList.remove('hidden');
+            return;
+        }
         sorted.forEach((lot) => {
             const row = tbody.insertRow(tbody.rows.length - (noResultsRow ? 1 : 0));
-            const expired = lot.expiry && new Date(lot.expiry) < new Date(new Date().toDateString());
-            const status = lot.status || (expired ? 'expirado' : 'ativo');
+            const status = this.computeLotStatus(lot);
+            const nearExpiry = this.isLotNearExpiry(lot);
+            if (nearExpiry) row.classList.add('lot-row-warning');
             row.innerHTML = `
                 <td class="px-3 py-2 text-sm">${lot.solutionName || '—'}</td>
                 <td class="px-3 py-2 text-sm font-semibold">${lot.lotNumber || '—'}</td>
                 <td class="px-3 py-2 text-sm">${lot.expiry || '—'}</td>
-                <td class="px-3 py-2 text-sm ${status === 'expirado' ? 'text-red-600 font-semibold' : ''}">${status}</td>
+                <td class="px-3 py-2 text-sm">${lot.openDate || '—'}</td>
+                <td class="px-3 py-2 text-sm">${lot.internalBudHours ? `${lot.internalBudHours} h` : '—'}</td>
+                <td class="px-3 py-2 text-sm ${status === 'expirado' || status === 'retirado' ? 'text-red-600 font-semibold' : ''}">${status}</td>
                 <td class="px-3 py-2 text-sm">${Number.isFinite(lot.stockMl) ? `${lot.stockMl} ml` : '—'}</td>
+                <td class="px-3 py-2 text-sm">${lot.manufacturer || '—'}</td>
+                <td class="px-3 py-2 text-sm">${lot.notes || '—'}</td>
                 <td class="px-3 py-2 text-right">
+                    <button type="button" class="btn-secondary btn-sm" data-action="toggle-lot-status" data-id="${lot.id}">${status === 'ativo' ? 'Retirar' : 'Ativar'}</button>
                     <button type="button" class="btn-danger btn-sm" data-action="delete-lot" data-id="${lot.id}">Remover</button>
                 </td>`;
         });
+    }
+
+    computeLotStatus(lot) {
+        const explicit = String(lot.status || '').toLowerCase();
+        if (explicit === 'retirado' || explicit === 'quarentena') return explicit;
+        if (lot.expiry && new Date(lot.expiry) < new Date(new Date().toDateString())) return 'expirado';
+        return explicit || 'ativo';
+    }
+
+    isLotNearExpiry(lot, days = 30) {
+        if (!lot?.expiry) return false;
+        const today = new Date(new Date().toDateString());
+        const expiry = new Date(lot.expiry);
+        if (Number.isNaN(expiry.getTime()) || expiry < today) return false;
+        const diffDays = Math.ceil((expiry - today) / (1000 * 60 * 60 * 24));
+        return diffDays <= days;
     }
 
     renderLotSelectors() {
@@ -1339,7 +1468,10 @@ class NutriSoft {
         if (!select) return;
         const solution = this.resolveSolutionForLotTarget(targetKey);
         const validLots = this.getLotsForSolution(solution);
-        select.innerHTML = `<option value="">(Sem lote)</option>` + validLots.map(lot => `<option value="${lot.id}">${lot.lotNumber} · Val ${lot.expiry || '—'}</option>`).join('');
+        select.innerHTML = `<option value="">(Sem lote)</option>` + validLots.map(lot => {
+            const near = this.isLotNearExpiry(lot, 30) ? ' ⚠' : '';
+            return `<option value="${lot.id}">${lot.lotNumber} · Val ${lot.expiry || '—'}${near}</option>`;
+        }).join('');
     }
 
     resolveSolutionForLotTarget(targetKey) {
@@ -1356,8 +1488,8 @@ class NutriSoft {
 
     getLotsForSolution(solutionName) {
         if (!solutionName) return [];
-        const now = new Date(new Date().toDateString());
-        return this.lots.filter(l => l.solutionName === solutionName && (l.status || 'ativo') === 'ativo' && (!l.expiry || new Date(l.expiry) >= now));
+        const active = this.lots.filter(l => l.solutionName === solutionName && this.computeLotStatus(l) === 'ativo');
+        return active.sort((a, b) => (a.expiry || '9999-99-99').localeCompare(b.expiry || '9999-99-99'));
     }
 
     collectSelectedLots(formulation) {
@@ -1387,16 +1519,25 @@ class NutriSoft {
 
     validateSelectedLots(formulation) {
         const selected = formulation?.preparationMeta?.componentLots || {};
-        const requiredKeys = ['proteins', 'glucose', 'sodium'];
+        const requiredKeys = ['proteins', 'glucose', 'lipids'];
         requiredKeys.forEach((key) => {
             if (!selected[key]) {
-                formulation.warnings.push(`Lote não selecionado para ${key}. Recomenda-se rastreabilidade completa.`);
+                formulation.errors.push(`Lote obrigatório não selecionado para ${key}.`);
             }
+        });
+        ['sodium', 'potassium', 'calcium'].forEach((key) => {
+            if (!selected[key]) formulation.warnings.push(`Lote não selecionado para ${key}. Recomenda-se rastreabilidade completa.`);
         });
 
         Object.values(selected).forEach((lot) => {
-            if (lot.expiry && new Date(lot.expiry) < new Date(new Date().toDateString())) {
+            const status = this.computeLotStatus(lot);
+            if (status === 'retirado' || status === 'quarentena') {
+                formulation.errors.push(`Lote ${lot.lotNumber} está em estado '${status}' e não pode ser usado.`);
+            }
+            if (status === 'expirado') {
                 formulation.errors.push(`Lote expirado detetado (${lot.lotNumber}) — impressão bloqueada.`);
+            } else if (this.isLotNearExpiry(lot, 14)) {
+                formulation.warnings.push(`Lote ${lot.lotNumber} próximo da validade (${lot.expiry}).`);
             }
         });
     }
@@ -1407,6 +1548,11 @@ class NutriSoft {
         const expiry = document.getElementById('lot-expiry')?.value;
         const manufacturer = document.getElementById('lot-manufacturer')?.value?.trim() || '—';
         const stockMl = parseNum(document.getElementById('lot-stock')?.value, 0);
+        const openDate = document.getElementById('lot-open-date')?.value || '';
+        const reconstitutionDate = document.getElementById('lot-reconstitution-date')?.value || '';
+        const internalBudHours = parseNum(document.getElementById('lot-internal-bud')?.value, 0);
+        const status = document.getElementById('lot-status')?.value || 'ativo';
+        const notes = document.getElementById('lot-notes')?.value?.trim() || '';
 
         if (!solutionName || !lotNumber) {
             this.dataManager.displayNotification('Indique solução e número de lote.', 'warning');
@@ -1424,7 +1570,11 @@ class NutriSoft {
             expiry,
             manufacturer,
             stockMl,
-            status: 'ativo',
+            openDate,
+            reconstitutionDate,
+            internalBudHours: internalBudHours > 0 ? internalBudHours : null,
+            status,
+            notes,
             createdAt: new Date().toISOString()
         };
 
@@ -1437,9 +1587,21 @@ class NutriSoft {
     }
 
     handleLotAction(event) {
-        const btn = event.target.closest('button[data-action="delete-lot"]');
+        const btn = event.target.closest('button[data-action]');
         if (!btn) return;
         const lotId = btn.dataset.id;
+        if (btn.dataset.action === 'toggle-lot-status') {
+            this.lots = this.lots.map(lot => {
+                if (lot.id !== lotId) return lot;
+                const current = this.computeLotStatus(lot);
+                return { ...lot, status: current === 'ativo' ? 'retirado' : 'ativo' };
+            });
+            this.dataManager.saveLots(this.lots);
+            this.renderLots();
+            this.renderLotSelectors();
+            return;
+        }
+        if (btn.dataset.action !== 'delete-lot') return;
         this.lots = this.lots.filter(lot => lot.id !== lotId);
         this.dataManager.saveLots(this.lots);
         AuditLogger.log('deleteLot', { lotId });
@@ -2541,6 +2703,14 @@ class NutriSoft {
         };
     }
 
+    normalizeFormulationRoutes(formulation) {
+        if (!formulation) return formulation;
+        const normalized = normalizeAdministrationRoute(formulation.route || formulation.administrationRoute);
+        formulation.route = normalized;
+        formulation.administrationRoute = normalized;
+        return formulation;
+    }
+
     validateFormulationAdvanced(formulation, errors = [], warnings = []) { 
         const patient = formulation.patient;
         const totalVolumePrescription = formulation.volume || 0;
@@ -2669,7 +2839,7 @@ class NutriSoft {
                 volume: totalVolume, // Prescribed total volume
                 infusionHours: infusionHours,
                 route: normalizedRoute,
-                administrationRoute: routeLabel(normalizedRoute),
+                administrationRoute: normalizedRoute,
                 proteins: this.calculateProteins(patient),
                 glucose: this.calculateGlucose(patient, infusionHours),
                 lipids: this.calculateLipids(patient),
@@ -2691,6 +2861,7 @@ class NutriSoft {
 
             formulation.glutamine = this.calculateGlutamine(patient, formulation.proteins);
             formulation.additives = this.calculateAdditives(patient, formulation, totalVolume);
+            this.normalizeFormulationRoutes(formulation);
             this.collectSelectedLots(formulation);
 
             let calculatedVolumeSum = (formulation.proteins?.volume || 0) +
@@ -2822,6 +2993,23 @@ class NutriSoft {
         if (value === undefined || value === null || isNaN(value) || !isFinite(value)) return `--- ${unit}`; 
         return `${Number(value).toFixed(decimalPlaces)} ${unit}`;
     }
+
+    getSolutionConcentrationSummary(solutionName) {
+        const details = this.solutions?.[solutionName];
+        if (!details) return solutionName || '—';
+        const fields = [
+            details.protein_concentration ? `Prot ${details.protein_concentration} g/L` : null,
+            details.glucose_concentration ? `Gluc ${details.glucose_concentration} g/L` : null,
+            details.lipid_concentration ? `Lip ${details.lipid_concentration} mg/ml` : null,
+            details.sodium_concentration ? `Na ${details.sodium_concentration} mEq/L` : null,
+            details.potassium_concentration ? `K ${details.potassium_concentration} mEq/L` : null,
+            details.calcium_concentration ? `Ca ${details.calcium_concentration} mEq/L` : null,
+            details.phosphorus_concentration ? `P ${details.phosphorus_concentration} mmol/L` : null
+        ].filter(Boolean);
+        if (!fields.length) return solutionName;
+        return `${solutionName} · ${fields.slice(0, 2).join(' · ')}`;
+    }
+
     formatCompositionDetails(formulation) {
         const patient = formulation.patient || {};
         const weight = Number(patient.weight) || 0;
@@ -3849,6 +4037,8 @@ class NutriSoft {
             doc.setFont(PDF_THEME.fonts.family, options.bodyFontStyle || 'normal');
             doc.setFontSize(PDF_THEME.fonts.small);
             let rowHeight = baseRowHeight;
+            const rightAlignColumns = options.rightAlignColumns || [];
+            const boldColumns = options.boldColumns || [];
             const cells = row.map((cell, idx) => {
                 const width = widths[idx];
                 const text = cell === undefined || cell === null ? '' : String(cell);
@@ -3860,7 +4050,16 @@ class NutriSoft {
                 const width = widths[idx];
                 const wrapped = cells[idx].wrapped;
                 doc.rect(x, y, width, rowHeight);
-                doc.text(wrapped, x + cellPadding, y + rowHeight - 2, { maxWidth: width - (cellPadding * 2) });
+                if (boldColumns.includes(idx)) {
+                    doc.setFont(PDF_THEME.fonts.family, 'bold');
+                } else {
+                    doc.setFont(PDF_THEME.fonts.family, options.bodyFontStyle || 'normal');
+                }
+                if (rightAlignColumns.includes(idx)) {
+                    doc.text(wrapped, x + width - cellPadding, y + rowHeight - 2, { maxWidth: width - (cellPadding * 2), align: 'right' });
+                } else {
+                    doc.text(wrapped, x + cellPadding, y + rowHeight - 2, { maxWidth: width - (cellPadding * 2) });
+                }
                 x += width;
             });
             y += rowHeight;
@@ -4021,47 +4220,62 @@ class NutriSoft {
                 'Cálcio': lotsByComponent.calcium
             };
             const lotInfo = lotLookup[label];
-            if (lotInfo?.lotNumber) noteParts.push(`Lote ${lotInfo.lotNumber} (${lotInfo.expiry || 's/valid'})`);
+            if (lotInfo?.lotNumber) noteParts.push(`Lote ${lotInfo.lotNumber}`);
             if (component.error) noteParts.push(`⚠ ${component.error}`);
+            const presentation = component.solution && this.solutions?.[component.solution]
+                ? this.getSolutionConcentrationSummary(component.solution)
+                : (component.solution || '---');
             componentRows.push([
+                options.order || String(componentRows.length + 1),
                 label,
-                component.solution || '---',
+                presentation,
+                lotInfo?.lotNumber || '—',
+                lotInfo?.expiry || '—',
                 this.formatValue(dose, doseUnit, options.doseDp ?? 2),
                 this.formatValue(volume, volumeUnit, options.volumeDp ?? 1),
-                noteParts.join(' · ')
+                noteParts.join(' · '),
+                '☐'
             ]);
         };
 
-        pushRow('Aminoácidos', proteins, { doseUnit: 'g', doseDp: 1 });
+        pushRow('Aminoácidos', proteins, { doseUnit: 'g', doseDp: 1, order: 1 });
         if (formulation.glutamine?.volume > 0) {
-            pushRow('Glutamina (Dipeptídeo)', formulation.glutamine, { doseKey: 'required_g_dipeptide', doseUnit: 'g', doseDp: 2 });
+            pushRow('Glutamina (Dipeptídeo)', formulation.glutamine, { doseKey: 'required_g_dipeptide', doseUnit: 'g', doseDp: 2, order: componentRows.length + 1 });
         }
-        pushRow('Glucose', glucose, { doseUnit: 'g', doseDp: 1 });
-        pushRow('Lípidos', lipids, { doseUnit: 'g', doseDp: 1 });
+        pushRow('Glucose', glucose, { doseUnit: 'g', doseDp: 1, order: componentRows.length + 1 });
+        pushRow('Lípidos', lipids, { doseUnit: 'g', doseDp: 1, order: componentRows.length + 1 });
         const sodium = formulation.electrolytes?.sodium;
-        pushRow('Sódio (Total)', sodium, { doseKey: 'displayRequired', doseUnit: 'mEq' });
-        pushRow('Potássio', formulation.electrolytes?.potassium, { doseUnit: 'mEq' });
-        pushRow('Magnésio', formulation.electrolytes?.magnesium, { doseUnit: 'mEq' });
-        pushRow('Cálcio', formulation.electrolytes?.calcium, { doseUnit: 'mEq' });
-        pushRow('Fósforo', formulation.electrolytes?.phosphorus, { doseUnit: 'mmol' });
-        pushRow('Oligoelementos', formulation.additives?.oligoelements, { doseKey: 'volume', doseUnit: 'ml' });
-        pushRow('Vit. Hidrossolúveis', formulation.additives?.water_soluble_vitamins, { doseKey: 'volume', doseUnit: 'ml' });
-        pushRow('Vit. Lipossolúveis', formulation.additives?.fat_soluble_vitamins, { doseKey: 'volume', doseUnit: 'ml' });
+        pushRow('Sódio (Total)', sodium, { doseKey: 'displayRequired', doseUnit: 'mEq', order: componentRows.length + 1 });
+        pushRow('Potássio', formulation.electrolytes?.potassium, { doseUnit: 'mEq', order: componentRows.length + 1 });
+        pushRow('Magnésio', formulation.electrolytes?.magnesium, { doseUnit: 'mEq', order: componentRows.length + 1 });
+        pushRow('Cálcio', formulation.electrolytes?.calcium, { doseUnit: 'mEq', order: componentRows.length + 1 });
+        pushRow('Fósforo', formulation.electrolytes?.phosphorus, { doseUnit: 'mmol', order: componentRows.length + 1 });
+        pushRow('Oligoelementos', formulation.additives?.oligoelements, { doseKey: 'volume', doseUnit: 'ml', order: componentRows.length + 1 });
+        pushRow('Vit. Hidrossolúveis', formulation.additives?.water_soluble_vitamins, { doseKey: 'volume', doseUnit: 'ml', order: componentRows.length + 1 });
+        pushRow('Vit. Lipossolúveis', formulation.additives?.fat_soluble_vitamins, { doseKey: 'volume', doseUnit: 'ml', order: componentRows.length + 1 });
         if (formulation.additives?.insulin?.required > 0) {
-            pushRow('Insulina', formulation.additives.insulin, { doseUnit: 'UI', volumeDp: 3 });
+            pushRow('Insulina', formulation.additives.insulin, { doseUnit: 'UI', volumeDp: 3, order: componentRows.length + 1 });
         }
         if (formulation.additives?.heparin?.required > 0) {
-            pushRow('Heparina', formulation.additives.heparin, { doseUnit: 'UI', volumeDp: 3 });
+            pushRow('Heparina', formulation.additives.heparin, { doseUnit: 'UI', volumeDp: 3, order: componentRows.length + 1 });
         }
         if (formulation.additives?.carnitine?.required > 0) {
-            pushRow('Carnitina', formulation.additives.carnitine, { doseUnit: 'mg' });
+            pushRow('Carnitina', formulation.additives.carnitine, { doseUnit: 'mg', order: componentRows.length + 1 });
         }
-        pushRow('Água Estéril', formulation.water, { doseKey: 'volume', doseUnit: 'ml' });
+        pushRow('Água Estéril', formulation.water, { doseKey: 'volume', doseUnit: 'ml', order: componentRows.length + 1 });
 
         doc.setFont(PDF_THEME.fonts.family, 'bold');
-        doc.setFontSize(PDF_THEME.fonts.section);
-        doc.text('Ingredientes da Nutrição Parentérica', margin, y - 2);
-        y = this.pdfDrawTable(doc, margin, y, ['Componente', 'Stock/Concentração', 'Dose', 'Volume (ml)', 'Observações'], componentRows, [40, 42, 26, 28, usableWidth - 136]);
+        doc.setFontSize(11);
+        doc.text('Mapa Principal de Preparação (execução)', margin, y - 2);
+        y = this.pdfDrawTable(
+            doc,
+            margin,
+            y,
+            ['Ordem', 'Componente', 'Apresentação/Concentração', 'Lote', 'Validade', 'Dose', 'Volume (ml)', 'Observações', 'Check'],
+            componentRows,
+            [14, 30, 34, 20, 20, 16, 20, 28, 8],
+            { rowHeight: 7, headerHeight: 8, rightAlignColumns: [0, 5, 6], boldColumns: [1, 6] }
+        );
         y += 4;
 
         const properties = [
@@ -4152,7 +4366,28 @@ class NutriSoft {
         drawStackedBox('Avisos de Formulação', formulation.warnings || [], PDF_THEME.palette.warning);
         drawStackedBox('Erros Críticos', formulation.errors || [], PDF_THEME.palette.error);
 
-        const ensuredSign = this.pdfEnsureSpace(doc, y, 16);
+        const checkRows = [
+            ['Integridade da bolsa', '☐ Conforme'],
+            ['Partículas / turvação', '☐ Ausentes'],
+            ['Volume final confirmado', '☐ Sim'],
+            ['Fotoproteção aplicada', formulation.preparationMeta?.photoprotection ? '☐ Sim' : '☐ N/A'],
+            ['Conservação correta', '☐ Sim']
+        ];
+        const ensuredChecks = this.pdfEnsureSpace(doc, y, 22);
+        y = ensuredChecks.y;
+        if (ensuredChecks.pageAdded) {
+            doc.setFont(PDF_THEME.fonts.family, 'bold');
+            doc.setFontSize(PDF_THEME.fonts.section);
+            doc.text(headerText, margin, y - 4);
+        }
+        doc.setFont(PDF_THEME.fonts.family, 'bold');
+        doc.setFontSize(PDF_THEME.fonts.section);
+        doc.text('Conferência final em câmara', margin, y);
+        y += 2;
+        y = this.pdfDrawTable(doc, margin, y, ['Item', 'Confirmação'], checkRows, [usableWidth * 0.72, usableWidth * 0.28], { rowHeight: 7 });
+        y += 4;
+
+        const ensuredSign = this.pdfEnsureSpace(doc, y, 22);
         y = ensuredSign.y;
         if (ensuredSign.pageAdded) {
             doc.setFont(PDF_THEME.fonts.family, 'bold');
@@ -4165,6 +4400,8 @@ class NutriSoft {
         doc.text('Conferido por: ___________________________', margin + usableWidth / 2, y);
         y += 6;
         doc.text('Data/Hora de Revisão: ___________________________', margin, y);
+        y += 6;
+        doc.text('Observações/Desvios: _________________________________________________________________', margin, y);
         y += 6;
         doc.text(`Software NutriSoft · versão local · Hash prescrição: ${formulation.hash || '—'}`, margin, y);
     }
@@ -4305,17 +4542,19 @@ class NutriSoft {
         else if (formulation.patient?.weight < 5 || formulation.patient?.condition === 'neonate') bagType = 'BOLSA AQUOSA (A)';
 
         const patientDisplay = patientName || 'Doente';
+        const secondaryId = formulation.patient?.idNumber || formulation.patient?.processNumber || formulation.patient?.admissionNumber || '—';
         doc.setFont(PDF_THEME.fonts.family, 'bold');
         this.pdfFitText(doc, `Doente: ${patientDisplay}`, leftX, safeStartY + 12.8, leftW, 8.6, 7.5, 'bold');
         doc.setFont(PDF_THEME.fonts.family, 'normal');
         const serviceDisplay = formulation.patient?.service ? `Serviço: ${formulation.patient.service}` : 'Serviço: N/D';
-        this.pdfFitText(doc, serviceDisplay, leftX, safeStartY + 16.6, leftW, 7.8, 7.2, 'normal');
+        this.pdfFitText(doc, serviceDisplay, leftX, safeStartY + 16.2, leftW, 7.4, 7.0, 'normal');
+        this.pdfFitText(doc, `ID: ${secondaryId}`, leftX, safeStartY + 18.6, leftW, 7.2, 6.8, 'normal');
 
         doc.setDrawColor(...PDF_THEME.palette.subtleBorder);
-        doc.line(leftX, safeStartY + 18.1, leftX + leftW, safeStartY + 18.1);
+        doc.line(leftX, safeStartY + 19.5, leftX + leftW, safeStartY + 19.5);
 
         doc.setFont(PDF_THEME.fonts.family, 'bold');
-        this.pdfFitText(doc, bagType, leftX, safeStartY + 21.4, leftW, 8.5, 7.4, 'bold');
+        this.pdfFitText(doc, bagType, leftX, safeStartY + 23.0, leftW, 8.2, 7.2, 'bold');
 
         const dt = prescriptionDate ? new Date(prescriptionDate) : new Date();
         const dtDate = Number.isNaN(dt.getTime()) ? 'N/D' : dt.toLocaleDateString('pt-PT');
@@ -4336,7 +4575,7 @@ class NutriSoft {
             ['Osm', osm]
         ];
 
-        let y = safeStartY + 24.2;
+        let y = safeStartY + 25.4;
         doc.setFontSize(7.1);
         doc.setFont(PDF_THEME.fonts.family, 'normal');
         metaRows.forEach(([k, v]) => {
@@ -4353,7 +4592,7 @@ class NutriSoft {
             ['Azoto', this.formatValue(formulation.proteins?.required ?? 0, 'g', 2)],
             ['Glicose', this.formatValue(formulation.glucose?.required ?? 0, 'g', 1)],
             ['Sódio', this.formatValue(formulation.electrolytes?.sodium?.displayRequired ?? 0, 'mEq', 1)],
-            ['Lote', prepMeta.batch || '—'],
+            ['Prep', preparationNumber || '—'],
             ['Cal. Totais', this.formatValue(formulation.energy?.total ?? 0, 'kcal', 0)]
         ];
 
@@ -4381,8 +4620,13 @@ class NutriSoft {
         doc.setFont(PDF_THEME.fonts.family, 'bold');
         doc.setFontSize(8.6);
         const lightProtectCenterY = safeStartY + (splitY - safeStartY) / 2;
-        doc.text('PROTEGER', rightX + rightBandW / 2, lightProtectCenterY - 1.2, { align: 'center' });
-        doc.text('DA LUZ', rightX + rightBandW / 2, lightProtectCenterY + 2.8, { align: 'center' });
+        if (prepMeta.photoprotection) {
+            doc.text('PROTEGER', rightX + rightBandW / 2, lightProtectCenterY - 1.2, { align: 'center' });
+            doc.text('DA LUZ', rightX + rightBandW / 2, lightProtectCenterY + 2.8, { align: 'center' });
+        } else {
+            doc.text('USO', rightX + rightBandW / 2, lightProtectCenterY - 1.2, { align: 'center' });
+            doc.text('IV', rightX + rightBandW / 2, lightProtectCenterY + 2.8, { align: 'center' });
+        }
 
         doc.rect(rightX, splitY + 0.5, qrBox.w, qrBox.h);
         if (assets.qrDataUrl) {
@@ -4405,7 +4649,9 @@ class NutriSoft {
         doc.setFontSize(6.5);
         doc.text('Ass. Preparador: ___________  Ass. Revisor: ___________', leftX, splitY + 3.3, { maxWidth: leftW });
         const storageLine = prepMeta.storage || 'Conservar 2–8°C · Uso IV';
-        doc.text(`${storageLine} · Sem fit-to-page`, leftX, splitY + 6.2, { maxWidth: leftW });
+        const budHours = parseNum(prepMeta.budHours, 24);
+        doc.text(`${storageLine} · BUD ${budHours} h`, leftX, splitY + 6.2, { maxWidth: leftW });
+        doc.text('NÃO ADICIONAR NADA À BOLSA', leftX, splitY + 8.9, { maxWidth: leftW });
     }
     showAuditLogsModal() { 
         const modal = document.getElementById('audit-logs-modal');

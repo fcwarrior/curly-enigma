@@ -597,24 +597,63 @@
                         <label for="lot-stock" class="block text-sm font-medium text-gray-700">Stock (ml)</label>
                         <input type="number" id="lot-stock" class="input-field mt-1" min="0" step="1" value="0">
                     </div>
+                    <div>
+                        <label for="lot-open-date" class="block text-sm font-medium text-gray-700">Data abertura</label>
+                        <input type="date" id="lot-open-date" class="input-field mt-1">
+                    </div>
+                    <div>
+                        <label for="lot-reconstitution-date" class="block text-sm font-medium text-gray-700">Data reconstituição</label>
+                        <input type="date" id="lot-reconstitution-date" class="input-field mt-1">
+                    </div>
+                    <div>
+                        <label for="lot-internal-bud" class="block text-sm font-medium text-gray-700">BUD interno (h)</label>
+                        <input type="number" id="lot-internal-bud" class="input-field mt-1" min="0" step="1" placeholder="Opcional">
+                    </div>
+                    <div>
+                        <label for="lot-status" class="block text-sm font-medium text-gray-700">Estado</label>
+                        <select id="lot-status" class="input-field mt-1">
+                            <option value="ativo">Ativo</option>
+                            <option value="quarentena">Quarentena</option>
+                            <option value="retirado">Retirado/Recall</option>
+                        </select>
+                    </div>
+                    <div class="md:col-span-2">
+                        <label for="lot-notes" class="block text-sm font-medium text-gray-700">Observações</label>
+                        <input type="text" id="lot-notes" class="input-field mt-1" placeholder="Opcional">
+                    </div>
                 </div>
-                <div class="mb-4">
+                <div class="mb-4 flex flex-wrap gap-2">
                     <button type="button" id="add-lot-btn" class="btn-secondary"><i class="fas fa-plus mr-2"></i>Adicionar lote</button>
+                    <input type="text" id="lots-search-input" class="input-field" placeholder="Pesquisar lote/solução/fabricante">
+                    <select id="lots-filter-solution" class="input-field">
+                        <option value="">Todas as soluções</option>
+                    </select>
+                    <select id="lots-filter-status" class="input-field">
+                        <option value="">Todos os estados</option>
+                        <option value="ativo">Ativo</option>
+                        <option value="quarentena">Quarentena</option>
+                        <option value="retirado">Retirado/Recall</option>
+                        <option value="expirado">Expirado</option>
+                    </select>
                 </div>
                 <div class="overflow-x-auto border rounded-lg">
-                    <table class="w-full min-w-[760px]" id="lots-table">
+                    <table class="w-full min-w-[1100px]" id="lots-table">
                         <thead class="bg-gray-50">
                             <tr>
                                 <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Solução</th>
                                 <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Lote</th>
                                 <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Validade</th>
+                                <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Abertura</th>
+                                <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">BUD int.</th>
                                 <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Estado</th>
                                 <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Stock</th>
+                                <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Fabricante</th>
+                                <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Observações</th>
                                 <th class="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Ações</th>
                             </tr>
                         </thead>
                         <tbody id="lots-list" class="bg-white divide-y divide-gray-200">
-                            <tr class="no-results-row hidden"><td colspan="6">Sem lotes registados.</td></tr>
+                            <tr class="no-results-row hidden"><td colspan="10">Sem lotes registados.</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -903,6 +942,23 @@
                 </div>
                 <div class="modal-footer px-4 py-3 bg-gray-50 text-right sm:px-6">
                     <button id="close-audit-logs-modal-btn" type="button" class="btn-secondary"> Fechar </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="confirm-modal" class="fixed z-50 inset-0 hidden overflow-y-auto" aria-modal="true" role="dialog">
+        <div class="flex items-end justify-center min-h-screen px-4 pt-4 pb-20 text-center sm:block sm:p-0">
+            <div class="fixed inset-0 bg-gray-700 bg-opacity-60" aria-hidden="true"></div>
+            <span class="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">​</span>
+            <div class="inline-block align-bottom bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full">
+                <div class="bg-white px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
+                    <h3 class="text-lg font-semibold text-gray-900 mb-2">Confirmar ação</h3>
+                    <p id="confirm-modal-message" class="text-sm text-gray-700"></p>
+                </div>
+                <div class="bg-gray-50 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse gap-2">
+                    <button id="confirm-modal-yes" type="button" class="btn-primary">Confirmar</button>
+                    <button id="confirm-modal-no" type="button" class="btn-secondary">Cancelar</button>
                 </div>
             </div>
         </div>

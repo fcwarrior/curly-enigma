@@ -56,6 +56,9 @@ app.generatePreparationMap = NutriSoft.prototype.generatePreparationMap;
 app.buildLabelPayload = NutriSoft.prototype.buildLabelPayload;
 app.validatePdfPayload = NutriSoft.prototype.validatePdfPayload;
 app.validateSelectedLots = NutriSoft.prototype.validateSelectedLots;
+app.computeLotStatus = NutriSoft.prototype.computeLotStatus;
+app.isLotNearExpiry = NutriSoft.prototype.isLotNearExpiry;
+app.normalizeFormulationRoutes = NutriSoft.prototype.normalizeFormulationRoutes;
 
 const fullFormulation = {
   volume: 1500,
@@ -92,6 +95,10 @@ assert(typeof map === 'string' && map.includes('BOLSA'), 'Mapa de preparação i
 const lotFormulation = { warnings: [], errors: [], preparationMeta: { componentLots: { proteins: { lotNumber: 'L1', expiry: '2000-01-01' } } } };
 app.validateSelectedLots(lotFormulation);
 assert(lotFormulation.errors.length > 0, 'Lotes expirados devem bloquear preparação');
+
+const routeFormulation = { route: 'Periférica', administrationRoute: 'Central' };
+app.normalizeFormulationRoutes(routeFormulation);
+assert(routeFormulation.route === 'peripheral' && routeFormulation.administrationRoute === 'peripheral', 'Normalização de via falhou');
 
 const label = app.buildLabelPayload(fullFormulation, '123', 'João', '2026-01-15T00:00:00Z');
 assert(label.prep === '123', 'Label payload prep inválido');
