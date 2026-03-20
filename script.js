@@ -230,6 +230,7 @@ class DataManager {
         this.settingsKey = 'settings';
         this.userNameKey = 'userName';
         this.auditLogsKey = 'auditLogs';
+        this.lotsKey = 'lots';
         console.log("DataManager instance created.");
     }
 
@@ -288,9 +289,19 @@ class DataManager {
             solutions: this.getSolutions(),
             settings: this.getSettings(),
             userName: this.getUserName(),
-            auditLogs: this.getAuditLogs()
+            auditLogs: this.getAuditLogs(),
+            lots: this.getLots()
         };
         this.exportData('all', allData);
+    }
+
+
+    getLots() {
+        return this.getData(this.lotsKey) || [];
+    }
+
+    saveLots(lots) {
+        this.saveData(this.lotsKey, lots);
     }
 
     getUserName() {
@@ -439,7 +450,8 @@ class DataManager {
                         solutions: this.getSolutions(),
                         settings: this.getSettings(),
                         userName: this.getUserName(),
-                        auditLogs: this.getAuditLogs()
+                        auditLogs: this.getAuditLogs(),
+            lots: this.getLots()
                      }; 
                     filenameSuffix = '-all-data';
                     break;
@@ -485,6 +497,7 @@ class DataManager {
                 if (jsonData.settings && typeof jsonData.settings === 'object') { this.saveSettings(jsonData.settings); importedSomething = true; }
                 if (jsonData.userName && typeof jsonData.userName === 'string') { this.saveUserName(jsonData.userName); importedSomething = true; }
                 if (jsonData.auditLogs && Array.isArray(jsonData.auditLogs)) { this.saveAuditLogs(jsonData.auditLogs); importedSomething = true; }
+                if (jsonData.lots && Array.isArray(jsonData.lots)) { this.saveLots(jsonData.lots); importedSomething = true; }
                 if (!importedSomething) { this.displayNotification('Ficheiro de dados não contém secções válidas.', 'warning'); return false; }
                 this.displayNotification('Dados importados. Recarregue a aplicação.', 'success');
                 return true;
@@ -512,7 +525,31 @@ class DataManager {
     displayNotification(message, type = 'info') {
         const prefix = type.toUpperCase();
         console.log(`[${prefix}] Notification: ${message}`);
-        alert(`${prefix}: ${message}`);
+        const hostId = 'notification-host';
+        let host = document.getElementById(hostId);
+        if (!host) {
+            host = document.createElement('div');
+            host.id = hostId;
+            host.style.position = 'fixed';
+            host.style.top = '12px';
+            host.style.right = '12px';
+            host.style.zIndex = '9999';
+            host.style.display = 'flex';
+            host.style.flexDirection = 'column';
+            host.style.gap = '8px';
+            document.body.appendChild(host);
+        }
+        const toast = document.createElement('div');
+        toast.textContent = `${prefix}: ${message}`;
+        toast.style.padding = '10px 12px';
+        toast.style.borderRadius = '8px';
+        toast.style.color = '#fff';
+        toast.style.fontSize = '13px';
+        toast.style.maxWidth = '360px';
+        toast.style.boxShadow = '0 8px 24px rgba(0,0,0,0.2)';
+        toast.style.background = type === 'error' ? '#dc2626' : type === 'warning' ? '#d97706' : type === 'success' ? '#059669' : '#2563eb';
+        host.appendChild(toast);
+        setTimeout(() => toast.remove(), 5000);
     }
 }
 
@@ -536,7 +573,8 @@ class NutriSoft {
     constructor() {
         console.log("NutriSoft constructor starting...");
         this.dataManager = new DataManager();
-        this.patients = []; this.prescriptions = []; this.solutions = {}; this.settings = {}; this.userName = '';
+        this.patients = []; this.prescriptions = []; this.solutions = {}; this.lots = []; this.settings = {}; this.userName = '';
+        this.selectedLotMap = {};
         this.currentPrescriptionIndex = null; this.autoSaveInterval = null; this.evolutionChartInstance = null; this.components = {};
         this.loadInitialData();
         this.applySettings();
@@ -550,7 +588,7 @@ class NutriSoft {
             'handleRouteChange', 'handleDataImport', 'handleSettingsImport', 'handlePrescriptionAction',
             'handleReportsAction', 'handleSolutionsAction', 'saveSettings', 'addPatient',
             'clearPatientForm', 'calculateFormulation', 'savePrescription', 'printPrescription',
-            'saveSolution', 'clearSolutionForm', 'handlePatientListAction'
+            'saveSolution', 'clearSolutionForm', 'handlePatientListAction', 'addLot', 'handleLotAction'
         ];
         methodsToBind.forEach(method => {
             if (typeof this[method] === 'function') {
@@ -566,9 +604,10 @@ class NutriSoft {
         this.patients = this.dataManager.getPatients();
         this.prescriptions = this.dataManager.getPrescriptions();
         this.solutions = this.dataManager.getSolutions();
+        this.lots = this.dataManager.getLots();
         this.settings = this.dataManager.getSettings(); // Ensure settings are loaded early
         this.userName = this.dataManager.getUserName();
-        console.log("NutriSoft.loadInitialData finished. Patients:", this.patients.length, "Prescriptions:", this.prescriptions.length, "Solutions:", Object.keys(this.solutions).length);
+        console.log("NutriSoft.loadInitialData finished. Patients:", this.patients.length, "Prescriptions:", this.prescriptions.length, "Solutions:", Object.keys(this.solutions).length, "Lots:", this.lots.length);
     }
     init() { 
         console.log("NutriSoft.init starting...");
@@ -822,6 +861,9 @@ class NutriSoft {
         document.getElementById('preview-pdf-btn')?.addEventListener('click', () => this.previewPrescriptionPDF(this.currentPrescriptionIndex));
         document.getElementById('print-labels-btn')?.addEventListener('click', () => this.printLabelsOnly(this.currentPrescriptionIndex));
         document.getElementById('suggest-needs-btn')?.addEventListener('click', () => this.applySuggestedNeeds());
+        ['amino-acids-solution','glucose-solution','lipids-solution','nacl-solution','kcl-solution','cacl2-solution'].forEach(id => {
+            document.getElementById(id)?.addEventListener('change', () => this.renderLotSelectors());
+        });
 
         document.getElementById('save-settings-btn')?.addEventListener('click', this.saveSettings);
         ['auto-save-interval', 'enable-auto-save', 'enable-auto-export', 'access-level', 'perm-export', 'default-osmolarity-limit'].forEach(id => {
@@ -857,6 +899,9 @@ class NutriSoft {
 
         document.getElementById('add-solution-btn')?.addEventListener('click', () => this.editSolution()); 
         document.getElementById('save-solution-btn')?.addEventListener('click', this.saveSolution);
+        document.getElementById('add-lot-btn')?.addEventListener('click', this.addLot);
+        document.getElementById('lots-list')?.addEventListener('click', this.handleLotAction);
+
         document.getElementById('cancel-solution-btn')?.addEventListener('click', () => this.clearSolutionForm(true)); 
         document.getElementById('solution-type')?.addEventListener('change', (event) => {
             this.updateSolutionFormFieldsVisibility(event.target.value);
@@ -1140,6 +1185,8 @@ class NutriSoft {
         this.renderReports();
         this.renderPerformanceStats();
         this.renderSolutions();
+        this.renderLots();
+        this.renderLotSelectors();
         this.renderEvolutionPatientSelect();
         console.log("NutriSoft.renderUIAllSections: All sections rendering process initiated.");
     }
@@ -1212,7 +1259,184 @@ class NutriSoft {
             `;
         });
         this.checkAccessPermissions(); 
+        this.renderLots();
+        this.renderLotSelectors();
     }
+
+    renderLots() {
+        const tbody = document.getElementById('lots-list');
+        const solutionSelect = document.getElementById('lot-solution-name');
+        if (!tbody) return;
+
+        if (solutionSelect) {
+            const names = Object.keys(this.solutions).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+            solutionSelect.innerHTML = names.map(name => `<option value="${name}">${name}</option>`).join('');
+        }
+
+        const noResultsRowTemplate = tbody.querySelector('.no-results-row');
+        tbody.innerHTML = '';
+        if (noResultsRowTemplate) tbody.appendChild(noResultsRowTemplate.cloneNode(true));
+        const noResultsRow = tbody.querySelector('.no-results-row');
+
+        if (!this.lots.length) {
+            noResultsRow?.classList.remove('hidden');
+            return;
+        }
+        noResultsRow?.classList.add('hidden');
+
+        const sorted = [...this.lots].sort((a, b) => (a.expiry || '').localeCompare(b.expiry || ''));
+        sorted.forEach((lot) => {
+            const row = tbody.insertRow(tbody.rows.length - (noResultsRow ? 1 : 0));
+            const expired = lot.expiry && new Date(lot.expiry) < new Date(new Date().toDateString());
+            const status = lot.status || (expired ? 'expirado' : 'ativo');
+            row.innerHTML = `
+                <td class="px-3 py-2 text-sm">${lot.solutionName || '—'}</td>
+                <td class="px-3 py-2 text-sm font-semibold">${lot.lotNumber || '—'}</td>
+                <td class="px-3 py-2 text-sm">${lot.expiry || '—'}</td>
+                <td class="px-3 py-2 text-sm ${status === 'expirado' ? 'text-red-600 font-semibold' : ''}">${status}</td>
+                <td class="px-3 py-2 text-sm">${Number.isFinite(lot.stockMl) ? `${lot.stockMl} ml` : '—'}</td>
+                <td class="px-3 py-2 text-right">
+                    <button type="button" class="btn-danger btn-sm" data-action="delete-lot" data-id="${lot.id}">Remover</button>
+                </td>`;
+        });
+    }
+
+    renderLotSelectors() {
+        const container = document.getElementById('lot-selection-grid');
+        if (!container) return;
+
+        const targets = [
+            { key: 'proteins', label: 'Aminoácidos', inputId: 'lot-proteins' },
+            { key: 'glucose', label: 'Glucose', inputId: 'lot-glucose' },
+            { key: 'lipids', label: 'Lípidos', inputId: 'lot-lipids' },
+            { key: 'sodium', label: 'Sódio', inputId: 'lot-sodium' },
+            { key: 'potassium', label: 'Potássio', inputId: 'lot-potassium' },
+            { key: 'calcium', label: 'Cálcio', inputId: 'lot-calcium' }
+        ];
+
+        container.innerHTML = targets.map(t => `
+            <div>
+                <label for="${t.inputId}" class="block text-xs font-medium text-gray-600">${t.label}</label>
+                <select id="${t.inputId}" class="input-field mt-1"></select>
+            </div>
+        `).join('');
+
+        targets.forEach(t => this.populateLotSelect(t.inputId, t.key));
+    }
+
+    populateLotSelect(selectId, targetKey) {
+        const select = document.getElementById(selectId);
+        if (!select) return;
+        const solution = this.resolveSolutionForLotTarget(targetKey);
+        const validLots = this.getLotsForSolution(solution);
+        select.innerHTML = `<option value="">(Sem lote)</option>` + validLots.map(lot => `<option value="${lot.id}">${lot.lotNumber} · Val ${lot.expiry || '—'}</option>`).join('');
+    }
+
+    resolveSolutionForLotTarget(targetKey) {
+        const mapping = {
+            proteins: document.getElementById('amino-acids-solution')?.value,
+            glucose: document.getElementById('glucose-solution')?.value,
+            lipids: document.getElementById('lipids-solution')?.value,
+            sodium: document.getElementById('nacl-solution')?.value,
+            potassium: document.getElementById('kcl-solution')?.value,
+            calcium: document.getElementById('cacl2-solution')?.value
+        };
+        return mapping[targetKey] || null;
+    }
+
+    getLotsForSolution(solutionName) {
+        if (!solutionName) return [];
+        const now = new Date(new Date().toDateString());
+        return this.lots.filter(l => l.solutionName === solutionName && (l.status || 'ativo') === 'ativo' && (!l.expiry || new Date(l.expiry) >= now));
+    }
+
+    collectSelectedLots(formulation) {
+        const mapping = {
+            proteins: 'lot-proteins',
+            glucose: 'lot-glucose',
+            lipids: 'lot-lipids',
+            sodium: 'lot-sodium',
+            potassium: 'lot-potassium',
+            calcium: 'lot-calcium'
+        };
+        const selected = {};
+        Object.entries(mapping).forEach(([key, inputId]) => {
+            const lotId = document.getElementById(inputId)?.value;
+            if (!lotId) return;
+            const lot = this.lots.find(l => l.id === lotId);
+            if (!lot) return;
+            selected[key] = { ...lot };
+        });
+
+        if (formulation?.preparationMeta) {
+            formulation.preparationMeta.componentLots = selected;
+        }
+
+        return selected;
+    }
+
+    validateSelectedLots(formulation) {
+        const selected = formulation?.preparationMeta?.componentLots || {};
+        const requiredKeys = ['proteins', 'glucose', 'sodium'];
+        requiredKeys.forEach((key) => {
+            if (!selected[key]) {
+                formulation.warnings.push(`Lote não selecionado para ${key}. Recomenda-se rastreabilidade completa.`);
+            }
+        });
+
+        Object.values(selected).forEach((lot) => {
+            if (lot.expiry && new Date(lot.expiry) < new Date(new Date().toDateString())) {
+                formulation.errors.push(`Lote expirado detetado (${lot.lotNumber}) — impressão bloqueada.`);
+            }
+        });
+    }
+
+    addLot() {
+        const solutionName = document.getElementById('lot-solution-name')?.value;
+        const lotNumber = document.getElementById('lot-number')?.value?.trim();
+        const expiry = document.getElementById('lot-expiry')?.value;
+        const manufacturer = document.getElementById('lot-manufacturer')?.value?.trim() || '—';
+        const stockMl = parseNum(document.getElementById('lot-stock')?.value, 0);
+
+        if (!solutionName || !lotNumber) {
+            this.dataManager.displayNotification('Indique solução e número de lote.', 'warning');
+            return;
+        }
+        if (expiry && new Date(expiry) < new Date(new Date().toDateString())) {
+            this.dataManager.displayNotification('Não é permitido adicionar lotes já expirados.', 'error');
+            return;
+        }
+
+        const newLot = {
+            id: `lot_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+            solutionName,
+            lotNumber,
+            expiry,
+            manufacturer,
+            stockMl,
+            status: 'ativo',
+            createdAt: new Date().toISOString()
+        };
+
+        this.lots.push(newLot);
+        this.dataManager.saveLots(this.lots);
+        AuditLogger.log('addLot', { lotId: newLot.id, solutionName, lotNumber, expiry });
+        this.renderLots();
+        this.renderLotSelectors();
+        this.dataManager.displayNotification('Lote adicionado com sucesso.', 'success');
+    }
+
+    handleLotAction(event) {
+        const btn = event.target.closest('button[data-action="delete-lot"]');
+        if (!btn) return;
+        const lotId = btn.dataset.id;
+        this.lots = this.lots.filter(lot => lot.id !== lotId);
+        this.dataManager.saveLots(this.lots);
+        AuditLogger.log('deleteLot', { lotId });
+        this.renderLots();
+        this.renderLotSelectors();
+    }
+
     renderPatients() { 
         const select = document.getElementById('prescription-patient');
         if (!select) {
@@ -2435,6 +2659,7 @@ class NutriSoft {
 
             formulation.glutamine = this.calculateGlutamine(patient, formulation.proteins);
             formulation.additives = this.calculateAdditives(patient, formulation, totalVolume);
+            this.collectSelectedLots(formulation);
 
             let calculatedVolumeSum = (formulation.proteins?.volume || 0) +
                                       (formulation.glutamine?.volume || 0) +
@@ -2471,6 +2696,7 @@ class NutriSoft {
             formulation.energy = this.calculateEnergySummary(formulation);
             formulation.osmolarity = this.calculateOsmolarity(formulation);
             this.validateFormulationAdvanced(formulation, formulation.errors, formulation.warnings);
+            this.validateSelectedLots(formulation);
             formulation.compatibility = this.checkCompatibility(formulation, formulation.errors, formulation.warnings);
 
             this.displayResults(formulation);
@@ -2900,6 +3126,8 @@ class NutriSoft {
                 </td>`;
         });
         this.checkAccessPermissions(); 
+        this.renderLots();
+        this.renderLotSelectors();
     }
     renderReports(filteredPrescriptions = this.prescriptions) { 
         const reportsTbody = document.getElementById('reports-list-body');
@@ -3677,6 +3905,17 @@ class NutriSoft {
             if (component.fromPhosphorus && label.startsWith('Sódio')) {
                 noteParts.push(`${this.formatValue(component.fromPhosphorus, 'mEq', 2)} do Fosfato`);
             }
+            const lotsByComponent = formulation.preparationMeta?.componentLots || {};
+            const lotLookup = {
+                'Aminoácidos': lotsByComponent.proteins,
+                'Glucose': lotsByComponent.glucose,
+                'Lípidos': lotsByComponent.lipids,
+                'Sódio (Total)': lotsByComponent.sodium,
+                'Potássio': lotsByComponent.potassium,
+                'Cálcio': lotsByComponent.calcium
+            };
+            const lotInfo = lotLookup[label];
+            if (lotInfo?.lotNumber) noteParts.push(`Lote ${lotInfo.lotNumber} (${lotInfo.expiry || 's/valid'})`);
             if (component.error) noteParts.push(`⚠ ${component.error}`);
             componentRows.push([
                 label,
