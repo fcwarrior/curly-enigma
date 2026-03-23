@@ -691,6 +691,13 @@ class NutriSoft {
         this.lots = this.dataManager.getLots();
         this.settings = this.dataManager.getSettings(); // Ensure settings are loaded early
         this.userName = this.dataManager.getUserName();
+        if (!Array.isArray(this.patients) || this.patients.length === 0) {
+            this.patients = [
+                { id: 1, idNumber: '0001', name: 'Paciente A', service: 'Medicina Interna', weight: 70, height: 175, bmi: 22.9, condition: 'stable' },
+                { id: 2, idNumber: '0002', name: 'Paciente B', service: 'Cirurgia', weight: 62, height: 168, bmi: 22.0, condition: 'stable' }
+            ];
+            this.dataManager.savePatients(this.patients);
+        }
         console.log("NutriSoft.loadInitialData finished. Patients:", this.patients.length, "Prescriptions:", this.prescriptions.length, "Solutions:", Object.keys(this.solutions).length, "Lots:", this.lots.length);
     }
     init() { 
@@ -754,7 +761,7 @@ class NutriSoft {
     handleRouteChange() { 
         const hash = window.location.hash;
         console.log(`NutriSoft.handleRouteChange: Hash changed to: ${hash}`);
-        const sectionId = hash.substring(1) || 'patients'; // Default to 'patients'
+        const sectionId = hash.substring(1) || 'prescription'; // Default to calculator
         this.showSection(sectionId);
     }
     updateNavButtons(sectionId) { 
@@ -802,12 +809,12 @@ class NutriSoft {
             }
         } else {
             console.warn(`NutriSoft.showSection: Section element NOT FOUND for ID: '${sectionId}-section'.`);
-            if (sectionId !== 'patients') { 
-                 console.warn(`NutriSoft.showSection: Fallback to 'patients' section.`);
-                 this.showSection('patients'); 
-                 window.location.hash = 'patients'; 
+            if (sectionId !== 'prescription') { 
+                 console.warn(`NutriSoft.showSection: Fallback to 'prescription' section.`);
+                 this.showSection('prescription'); 
+                 window.location.hash = 'prescription'; 
             } else {
-                this.dataManager.displayNotification("Erro crítico: Secção 'patients' não encontrada. A aplicação pode não funcionar corretamente.", "error");
+                this.dataManager.displayNotification("Erro crítico: Secção 'prescription' não encontrada. A aplicação pode não funcionar corretamente.", "error");
             }
         }
     }
@@ -938,6 +945,12 @@ class NutriSoft {
         document.getElementById('add-patient-btn')?.addEventListener('click', this.addPatient);
         document.getElementById('clear-patient-form-btn')?.addEventListener('click', this.clearPatientForm);
         document.getElementById('patient-dob')?.addEventListener('change', (e) => this.updateAgeDisplay(e.target.value));
+        document.getElementById('prescription-patient')?.addEventListener('change', () => {
+            const msg = document.getElementById('calc-awaiting-message');
+            if (!msg) return;
+            const hasPatient = !!document.getElementById('prescription-patient')?.value;
+            msg.classList.toggle('hidden', hasPatient);
+        });
 
         document.getElementById('calculate-formulation-btn')?.addEventListener('click', this.calculateFormulation);
         document.getElementById('save-prescription-btn')?.addEventListener('click', this.savePrescription);
@@ -1338,6 +1351,7 @@ class NutriSoft {
             row.innerHTML = `
                 <td class="px-4 py-2 font-medium text-gray-900">${name}</td>
                 <td class="px-4 py-2">${details.type || 'N/A'}</td>
+                <td class="px-4 py-2 text-sm text-gray-600">${details.osmolarityContribution ? `${details.osmolarityContribution} mOsm/L` : 'N/A'}</td>
                 <td class="px-4 py-2 text-sm text-gray-600">${concentrationDetails}</td>
                 <td class="px-4 py-2 whitespace-nowrap text-right">
                     <button data-action="edit" data-name="${name}" class="table-action-btn text-blue-600 hover:text-blue-800 mr-2" title="Editar Solução"><i class="fas fa-edit"></i></button>
@@ -1681,11 +1695,13 @@ class NutriSoft {
         sortedPatients.forEach(patient => {
             const row = tbody.insertRow(tbody.rows.length - (noResultsRow ? 1 : 0));
             row.classList.add('hover:bg-gray-50');
-            row.insertCell().textContent = patient.idNumber || '-';
             row.insertCell().textContent = patient.name;
+            row.insertCell().textContent = patient.idNumber || '-';
             row.insertCell().textContent = patient.service || '-';
-            row.insertCell().textContent = `${patient.weight ?? '?'} kg`;
-            row.insertCell().textContent = patient.condition || '-';
+            row.insertCell().textContent = `${patient.weight ?? '?'} kg / ${patient.height ?? '?'} cm`;
+            const bmi = Number(patient.bmi) || ((patient.weight > 0 && patient.height > 0) ? (patient.weight / Math.pow(patient.height / 100, 2)) : null);
+            row.insertCell().innerHTML = bmi ? `${bmi.toFixed(1)} <span class="badge">NORMAL</span>` : '-';
+            row.insertCell().textContent = patient.condition || 'Estável';
 
             const actionsCell = row.insertCell();
             actionsCell.classList.add('whitespace-nowrap', 'p-3', 'text-right'); 
@@ -3408,15 +3424,14 @@ class NutriSoft {
              const patientNameDisplay = patient ? patient.name : `(${prescription.patientName || 'Doente Excluído'})`;
             const row = reportsTbody.insertRow(reportsTbody.rows.length - (noResultsRow ? 1 : 0));
             row.classList.add('hover:bg-gray-50');
+            const status = prescription.productionStatus || 'Pendente';
             row.innerHTML = `
-                <td class="p-3">${prescription.preparationNumber || '-'}</td>
-                <td class="p-3">${prescription.date ? new Date(prescription.date).toLocaleDateString() : '-'}</td>
+                <td class="p-3">${prescription.date ? new Date(prescription.date).toLocaleString() : '-'}</td>
                 <td class="p-3">${patientNameDisplay}</td>
                 <td class="p-3">${this.formatValue(prescription.volume, 'ml', 0)}</td>
-                <td class="p-3">${this.formatValue(prescription.osmolarity, 'mOsm/L', 0)}</td>
-                <td class="p-3">${prescription.createdBy || '-'}</td>
-                <td class="p-3">${prescription.createdAt ? new Date(prescription.createdAt).toLocaleDateString() : '-'}</td>
-                 <td class="p-3 whitespace-nowrap text-right">
+                <td class="p-3">${routeLabel(prescription.route || prescription.formulation?.route)}</td>
+                <td class="p-3"><span class="badge">${status}</span></td>
+                <td class="p-3 whitespace-nowrap text-right">
                      <button data-action="view" data-prep-number="${prescription.preparationNumber}" class="table-action-btn text-blue-600 hover:text-blue-800 mr-2" title="Visualizar Detalhes"><i class="fas fa-eye"></i></button>
                      <button data-action="edit" data-prep-number="${prescription.preparationNumber}" class="table-action-btn text-yellow-600 hover:text-yellow-800 mr-2" title="Editar Prescrição"><i class="fas fa-edit"></i></button>
                      <button data-action="print" data-prep-number="${prescription.preparationNumber}" class="table-action-btn text-green-600 hover:text-green-800 mr-2" title="Imprimir Prescrição"><i class="fas fa-print"></i></button>
@@ -3843,7 +3858,7 @@ class NutriSoft {
     }
     setupReportsSearch() { 
         const searchInput = document.getElementById('reports-search-input'); 
-        searchInput?.addEventListener('input', () => this.filterTable('reports-list-body', searchInput.value.toLowerCase().trim(), 8)); 
+        searchInput?.addEventListener('input', () => this.filterTable('reports-list-body', searchInput.value.toLowerCase().trim(), 7)); 
     }
     filterTable(tbodyId, query, colspan) { 
         const tbody = document.getElementById(tbodyId);

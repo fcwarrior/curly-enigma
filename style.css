@@ -18,6 +18,57 @@ body {
     padding-right: 1rem;
 }
 
+header {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 260px;
+    height: 100vh;
+    overflow-y: auto;
+}
+
+header .container {
+    max-width: none;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+}
+
+header nav {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch !important;
+    margin-top: 1rem;
+}
+
+main {
+    margin-left: 260px;
+    max-width: calc(100% - 260px) !important;
+}
+
+.calc-layout {
+    display: grid;
+    grid-template-columns: 1fr 320px;
+    gap: 1rem;
+}
+
+.calc-side-panel {
+    background: #eff6ff;
+    border: 1px solid #bfdbfe;
+    border-radius: 0.75rem;
+    padding: 1rem;
+    position: sticky;
+    top: 1rem;
+    height: fit-content;
+}
+
+.calc-awaiting-message {
+    background: #dbeafe;
+    border-radius: 0.5rem;
+    color: #1e3a8a;
+    padding: 0.75rem;
+}
+
 /* --- Header --- */
 /* Styling primarily handled by Tailwind classes in HTML */
 
@@ -402,6 +453,16 @@ tbody tr:hover:not(.no-results-row) { /* Don't apply hover to no-results row */
     background: #fff7ed;
 }
 
+.badge {
+    display: inline-block;
+    padding: 0.15rem 0.55rem;
+    border-radius: 999px;
+    background: #e0e7ff;
+    color: #1e40af;
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
 
 /* --- Modals --- */
 /* Basic modal structure is defined by Tailwind classes in HTML */
@@ -415,6 +476,18 @@ body.modal-open {
 
 /* --- Responsive Adjustments --- */
 @media (max-width: 768px) { /* md breakpoint approx */
+    header {
+        position: static;
+        width: 100%;
+        height: auto;
+    }
+    main {
+        margin-left: 0;
+        max-width: 100% !important;
+    }
+    .calc-layout {
+        grid-template-columns: 1fr;
+    }
     header .container {
         /* Allow stacking via flex-wrap in HTML */
     }

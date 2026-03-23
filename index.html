@@ -51,21 +51,21 @@
                     <!-- Consider adding alt text or removing if purely decorative -->
                     <img src="ULSSMsgtf.jpg" alt="Logo ULSSM" class="h-12 mr-4">
                     <div>
-                        <h1 class="text-2xl font-bold">NutriSoft</h1>
-                        <p class="text-sm text-gray-200">Serviço de Gestão Técnico-Farmacêutica - ULSSM</p>
+                        <h1 class="text-2xl font-bold">NutriCalc</h1>
+                        <p class="text-sm text-gray-200">Nutrição Parenteral</p>
                         <!-- User Name Input -->
                         <input type="text" id="user-name" placeholder="Nome do Utilizador" title="Insira o seu nome (será guardado)" class="mt-2 input-field text-black !text-black bg-white rounded px-2 py-1 text-sm" style="max-width: 200px;">
                     </div>
                 </div>
                 <!-- Navigation Menu -->
                 <nav class="flex flex-wrap items-center gap-2">
+                    <button id="prescription-nav-btn" class="nav-btn" title="Calculadora NP"> <i class="fas fa-calculator mr-1"></i>Calculadora NP </button>
+                    <button id="reports-nav-btn" class="nav-btn" title="Produção"> <i class="fas fa-industry mr-1"></i>Produção </button>
                     <button id="patients-nav-btn" class="nav-btn" title="Gerir Doentes"> <i class="fas fa-users mr-1"></i>Doentes </button>
-                    <button id="prescription-nav-btn" class="nav-btn" title="Criar ou Ver Prescrições"> <i class="fas fa-prescription mr-1"></i>Prescrições </button>
-                    <button id="reports-nav-btn" class="nav-btn" title="Ver Relatórios de Prescrições"> <i class="fas fa-chart-bar mr-1"></i>Relatórios </button>
-                    <button id="evolution-nav-btn" class="nav-btn" title="Ver Evolução do Doente"> <i class="fas fa-chart-line mr-1"></i>Evolução </button>
-                    <button id="performance-nav-btn" class="nav-btn" title="PharmaDash - Avaliação de desempenho individual"> <i class="fas fa-tachometer-alt mr-1"></i>PharmaDash </button>
-                    <button id="solutions-nav-btn" class="nav-btn hidden" title="Gerir Soluções (Admin)"> <i class="fas fa-flask mr-1"></i>Soluções </button> <!-- Hidden by default, shown by JS based on permissions -->
-                    <button id="settings-nav-btn" class="nav-btn hidden" title="Configurações (Admin)"> <i class="fas fa-cog mr-1"></i>Configurações </button> <!-- Hidden by default, shown by JS -->
+                    <button id="solutions-nav-btn" class="nav-btn" title="Gerir Soluções (Admin)"> <i class="fas fa-flask mr-1"></i>Soluções </button>
+                    <button id="settings-nav-btn" class="nav-btn" title="Configurações (Admin)"> <i class="fas fa-cog mr-1"></i>Configurações </button>
+                    <button id="evolution-nav-btn" class="nav-btn hidden" title="Ver Evolução do Doente"> <i class="fas fa-chart-line mr-1"></i>Evolução </button>
+                    <button id="performance-nav-btn" class="nav-btn hidden" title="PharmaDash - Avaliação de desempenho individual"> <i class="fas fa-tachometer-alt mr-1"></i>PharmaDash </button>
                     <!-- Options Dropdown for Data Management -->
                     <div class="relative inline-block text-left">
                         <button id="options-menu-button" type="button" class="nav-btn inline-flex items-center" aria-haspopup="true" aria-expanded="false" title="Opções de Importação/Exportação de Dados">
@@ -166,25 +166,29 @@
                 </form>
                 <!-- Patient List -->
                 <div class="patient-list">
-                    <h3 class="text-xl font-semibold mb-4 flex items-center"><i class="fas fa-list mr-2"></i>Lista de Doentes</h3>
+                    <div class="mb-4 flex flex-wrap items-center gap-2 justify-between">
+                        <h3 class="text-xl font-semibold flex items-center"><i class="fas fa-list mr-2"></i>Doentes</h3>
+                        <button type="button" class="btn-primary"><i class="fas fa-user-plus mr-2"></i>Novo Doente</button>
+                    </div>
                     <div class="mb-4">
-                        <input type="text" id="patient-search-input" placeholder="Pesquisar por nome, nº ID, serviço..." class="input-field w-full">
+                        <input type="text" id="patient-search-input" placeholder="Pesquisar por nome ou processo..." class="input-field w-full">
                     </div>
                     <div class="overflow-x-auto border rounded-lg">
-                        <table class="w-full min-w-[600px]">
+                        <table class="w-full min-w-[900px]">
                             <thead class="bg-gray-50">
                                 <tr>
-                                    <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Nº ID</th>
                                     <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Nome</th>
+                                    <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ID</th>
                                     <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Serviço</th>
-                                    <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Peso</th>
+                                    <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Peso/Altura</th>
+                                    <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">IMC</th>
                                     <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Condição</th>
                                     <th class="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Ações</th>
                                 </tr>
                             </thead>
                             <tbody id="patients-list" class="bg-white divide-y divide-gray-200">
                                 <!-- Patient rows will be inserted here by JS -->
-                                <tr class="no-results-row hidden"><td colspan="6">Nenhum doente encontrado.</td></tr>
+                                <tr class="no-results-row hidden"><td colspan="7">Nenhum doente encontrado.</td></tr>
                             </tbody>
                         </table>
                     </div>
@@ -196,6 +200,7 @@
         <section id="prescription-section" class="section hidden bg-white rounded-lg shadow-md p-6 mb-8">
             <h2 class="text-2xl font-semibold mb-6 flex items-center"><i class="fas fa-prescription mr-2"></i>Prescrição de Nutrição Parentérica</h2>
 
+            <div class="calc-layout">
              <form id="prescription-form" novalidate>
                 <!-- Prescription Details Group -->
                 <fieldset class="mb-6 p-4 bg-gray-50 rounded-md border border-gray-200">
@@ -448,6 +453,14 @@
                      <p class="text-gray-500 text-sm"><span class="text-red-500">*</span> Campos obrigatórios</p>
                 </div>
             </form> <!-- End of prescription form -->
+            <aside class="calc-side-panel">
+                <h3 class="text-lg font-semibold mb-2 flex items-center"><i class="fas fa-info-circle mr-2"></i>Resumo da Formulação</h3>
+                <div id="calc-awaiting-message" class="calc-awaiting-message">
+                    <strong>Aguardando Doente</strong>
+                    <p>Selecione um doente para iniciar o cálculo da formulação.</p>
+                </div>
+            </aside>
+            </div>
 
             <!-- Formulation Results Display Area -->
             <div id="formulation-results" class="hidden mt-6 border-t border-gray-200 pt-6">
@@ -498,30 +511,28 @@
             </div>
         </section>
 
-        <!-- Reports Section -->
+        <!-- Reports Section / Produção -->
         <section id="reports-section" class="section hidden bg-white rounded-lg shadow-md p-6 mb-8">
-            <h2 class="text-2xl font-semibold mb-4 flex items-center"><i class="fas fa-chart-bar mr-2"></i>Relatórios e Histórico Geral</h2>
+            <h2 class="text-2xl font-semibold mb-4 flex items-center"><i class="fas fa-industry mr-2"></i>Produção</h2>
              <div class="mb-4">
-                <input type="text" id="reports-search-input" placeholder="Pesquisar relatórios por #Prep, Data, Doente..." class="input-field w-full md:w-1/2">
+                <input type="text" id="reports-search-input" placeholder="Pesquisar prescrições por data ou doente..." class="input-field w-full md:w-1/2">
             </div>
 
             <div class="overflow-x-auto border rounded-lg">
                 <table class="w-full min-w-[800px]" id="reports-table">
                      <thead class="bg-gray-50">
                         <tr>
-                            <th class="p-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">#Prep</th>
                             <th class="p-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Data</th>
                             <th class="p-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Doente</th>
                             <th class="p-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Volume</th>
-                            <th class="p-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Osmolaridade</th>
-                             <th class="p-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Criado Por</th>
-                            <th class="p-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Data Criação</th>
+                            <th class="p-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Via</th>
+                            <th class="p-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Estado</th>
                             <th class="p-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Ações</th>
                         </tr>
                     </thead>
                     <tbody id="reports-list-body" class="bg-white divide-y divide-gray-200">
                         <!-- Report rows will be inserted here by JS -->
-                        <tr class="no-results-row hidden"><td colspan="8">Nenhuma prescrição encontrada.</td></tr>
+                        <tr class="no-results-row hidden"><td colspan="7">Nenhuma prescrição guardada.</td></tr>
                     </tbody>
                 </table>
             </div>
@@ -665,13 +676,14 @@
                         <tr>
                             <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Nome</th>
                             <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Tipo</th>
-                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Composição/Osmolaridade</th>
+                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Osmolaridade</th>
+                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Detalhes</th>
                             <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Ações</th>
                         </tr>
                     </thead>
                     <tbody id="solutions-list" class="bg-white divide-y divide-gray-200">
                         <!-- Solution rows will be inserted here by JS -->
-                         <tr class="no-results-row hidden"><td colspan="4">Nenhuma solução definida.</td></tr>
+                         <tr class="no-results-row hidden"><td colspan="5">Nenhuma solução definida.</td></tr>
                     </tbody>
                 </table>
             </div>
@@ -679,7 +691,29 @@
 
         <!-- Settings Section (Admin Only) -->
         <section id="settings-section" class="section hidden bg-white rounded-lg shadow-md p-6 mb-8">
-             <h2 class="text-2xl font-semibold mb-4 flex items-center"><i class="fas fa-cog mr-2"></i>Configurações da Aplicação</h2>
+             <h2 class="text-2xl font-semibold mb-4 flex items-center"><i class="fas fa-cog mr-2"></i>Configurações &amp; Backup</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                <div class="border rounded-lg p-4 bg-white shadow-sm">
+                    <div class="flex items-start gap-3">
+                        <i class="fas fa-download text-blue-600 text-xl mt-1"></i>
+                        <div>
+                            <h3 class="font-semibold text-lg">Exportar Dados</h3>
+                            <p class="text-sm text-gray-600">Guarda um ficheiro com doentes, soluções e histórico de prescrições.</p>
+                            <button type="button" class="btn-primary mt-3">Descarregar Backup</button>
+                        </div>
+                    </div>
+                </div>
+                <div class="border rounded-lg p-4 bg-white shadow-sm">
+                    <div class="flex items-start gap-3">
+                        <i class="fas fa-upload text-emerald-600 text-xl mt-1"></i>
+                        <div>
+                            <h3 class="font-semibold text-lg">Importar Dados</h3>
+                            <p class="text-sm text-gray-600">Restaura um backup. Esta ação substitui os dados atuais.</p>
+                            <button type="button" class="btn-secondary mt-3">Carregar Backup</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
             <form id="settings-form" class="space-y-6" novalidate>
                 <!-- General Settings -->
                  <fieldset class="border p-4 rounded-md">
