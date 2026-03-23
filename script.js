@@ -659,6 +659,7 @@ class NutriSoft {
         this.dataManager = new DataManager();
         this.patients = []; this.prescriptions = []; this.solutions = {}; this.lots = []; this.settings = {}; this.userName = '';
         this.selectedLotMap = {};
+        this.currentPreviewData = null;
         this.currentPrescriptionIndex = null; this.autoSaveInterval = null; this.evolutionChartInstance = null; this.components = {};
         this.loadInitialData();
         this.applySettings();
@@ -970,6 +971,10 @@ class NutriSoft {
 
         document.getElementById('view-audit-logs-btn')?.addEventListener('click', () => { this.showAuditLogsModal(); this.renderAuditLogs(); });
         document.getElementById('close-audit-logs-modal-btn')?.addEventListener('click', () => { this.hideAuditLogsModal(); });
+        document.getElementById('close-print-preview-modal-btn')?.addEventListener('click', () => this.hidePrintPreviewModal());
+        document.getElementById('preview-tab-map')?.addEventListener('click', () => this.setPreviewTab('map'));
+        document.getElementById('preview-tab-label')?.addEventListener('click', () => this.setPreviewTab('label'));
+        document.getElementById('print-preview-action-btn')?.addEventListener('click', () => this.printCurrentPreviewTab());
 
         document.querySelectorAll('.nav-btn[id$="-nav-btn"]').forEach(btn => {
             btn.addEventListener('click', (event) => {
@@ -3782,12 +3787,156 @@ class NutriSoft {
             details = this.buildPdfExportContext(originalIndex);
             const { formulationToPrint, prepDetails, logDetails } = details;
             AuditLogger.log('previewPDFInitiated', logDetails);
-            await this.exportPDF(formulationToPrint, prepDetails.map, prepDetails.prepNum, prepDetails.patientName, prepDetails.date, { mode: 'preview' });
+            this.showPrintPreviewModal({
+                formulation: formulationToPrint,
+                preparationMap: prepDetails.map,
+                prepNumber: prepDetails.prepNum,
+                patientName: prepDetails.patientName,
+                prescriptionDate: prepDetails.date
+            });
         } catch (error) {
             console.error('NutriSoft.previewPrescriptionPDF:', error);
             this.dataManager.displayNotification(`Erro na pré-visualização do PDF: ${error.message}.`, 'error');
             AuditLogger.log('previewPDFError', { ...(details?.logDetails || {}), error: error.message, stack: error.stack });
         }
+    }
+
+    showPrintPreviewModal(payload) {
+        this.currentPreviewData = payload;
+        const modal = document.getElementById('print-preview-modal');
+        if (!modal) return;
+        modal.classList.remove('hidden');
+        document.body.classList.add('modal-open');
+        this.setPreviewTab('map');
+    }
+
+    hidePrintPreviewModal() {
+        const modal = document.getElementById('print-preview-modal');
+        if (!modal) return;
+        modal.classList.add('hidden');
+        document.body.classList.remove('modal-open');
+    }
+
+    setPreviewTab(tab) {
+        const btnMap = document.getElementById('preview-tab-map');
+        const btnLabel = document.getElementById('preview-tab-label');
+        const content = document.getElementById('print-preview-content');
+        const actionBtn = document.getElementById('print-preview-action-btn');
+        if (!this.currentPreviewData || !content || !btnMap || !btnLabel || !actionBtn) return;
+
+        const isMap = tab === 'map';
+        btnMap.classList.toggle('active', isMap);
+        btnMap.classList.toggle('bg-blue-50', isMap);
+        btnLabel.classList.toggle('active', !isMap);
+        btnLabel.classList.toggle('bg-blue-50', !isMap);
+        actionBtn.innerHTML = isMap ? '<i class="fas fa-print mr-2"></i>Imprimir Mapa' : '<i class="fas fa-print mr-2"></i>Imprimir Rótulo';
+        content.innerHTML = isMap
+            ? this.renderProductionMapPreviewHtml(this.currentPreviewData)
+            : this.renderLabelPreviewHtml(this.currentPreviewData);
+        content.dataset.currentTab = tab;
+    }
+
+    printCurrentPreviewTab() {
+        const content = document.getElementById('print-preview-content');
+        if (!content) return;
+        const html = content.innerHTML;
+        const w = window.open('', '_blank', 'width=980,height=900');
+        if (!w) return;
+        w.document.write(`
+            <html><head><title>Print Preview</title>
+            <style>
+                body{font-family:Segoe UI,Arial,sans-serif;padding:16px;background:white;}
+                table{width:100%;border-collapse:collapse}
+                th,td{border-bottom:1px solid #d7e0ec;padding:6px 4px;text-align:left}
+                .pp-label-card{max-width:520px;border:2px solid #22314d;border-radius:16px;margin:0 auto;padding:18px}
+                .pp-kpi{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;background:#f3f6fb;border:1px solid #d5deea;border-radius:8px;padding:10px;margin-bottom:14px}
+                .pp-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px 18px}
+                .pp-divider{border-top:2px solid #1e293b;margin:10px 0 12px}
+                .pp-title{font-size:42px;font-weight:800;margin:0 0 4px}
+                .pp-subtitle{margin:0 0 10px;color:#4b6382}
+            </style></head><body>${html}</body></html>
+        `);
+        w.document.close();
+        w.focus();
+        w.print();
+    }
+
+    renderProductionMapPreviewHtml({ formulation, prepNumber, patientName }) {
+        const patient = formulation?.patient || {};
+        const energy = formulation?.energy || {};
+        const components = this.buildPreviewComponentRows(formulation);
+        return `
+            <div>
+                <div class="pp-title">MAPA DE PRODUÇÃO</div>
+                <div class="pp-subtitle">Nutrição Parentérica</div>
+                <div class="pp-divider"></div>
+                <div class="pp-grid">
+                    <div><strong>Doente:</strong> ${patientName || patient.name || '—'}</div>
+                    <div><strong>Volume Total:</strong> ${this.formatValue(formulation.volume, 'mL', 0)}</div>
+                    <div><strong>ID:</strong> ${patient.idNumber || patient.processNumber || '—'}</div>
+                    <div><strong>Perfusão:</strong> ${formulation.infusionHours || 24} h</div>
+                    <div><strong>Serviço:</strong> ${patient.service || '—'}</div>
+                    <div><strong>Via:</strong> ${routeLabel(formulation.route || formulation.administrationRoute)}</div>
+                    <div><strong>Peso:</strong> ${this.formatValue(patient.weight, 'kg', 0)}</div>
+                    <div><strong>Osmolaridade:</strong> ${this.formatValue(formulation.osmolarity, 'mOsm/L', 0)}</div>
+                </div>
+                <div class="pp-kpi">
+                    <div><div class="text-xs">ENERGIA TOTAL</div><strong>${this.formatValue(energy.total, 'kcal', 0)}</strong></div>
+                    <div><div class="text-xs">RÁCIO NPC:N</div><strong>${energy.NPCtoNRatio ? energy.NPCtoNRatio.toFixed(0) : '—'}:1</strong></div>
+                    <div><div class="text-xs">GIR</div><strong>${energy.GIR ? energy.GIR.toFixed(2) : '—'} mg/kg/min</strong></div>
+                </div>
+                <table class="pp-table">
+                    <thead><tr><th>Ordem</th><th>Componente</th><th>Solução</th><th style="text-align:right">Volume (mL)</th><th>Check</th></tr></thead>
+                    <tbody>
+                        ${components.map((r, i) => `<tr><td>${i + 1}</td><td>${r.label}</td><td>${r.solution}</td><td style="text-align:right">${r.volume}</td><td>☐</td></tr>`).join('')}
+                    </tbody>
+                </table>
+            </div>
+        `;
+    }
+
+    renderLabelPreviewHtml({ formulation, patientName }) {
+        const patient = formulation?.patient || {};
+        const energy = formulation?.energy || {};
+        return `
+            <div class="pp-label-card">
+                <div style="text-align:center;font-size:42px;font-weight:800;letter-spacing:1px;">NUTRIÇÃO PARENTÉRICA</div>
+                <div style="text-align:center;font-size:22px;font-weight:700;letter-spacing:1px;">USO INTRAVENOSO</div>
+                <div class="pp-divider"></div>
+                <div><strong>Doente:</strong> ${patientName || patient.name || '—'}</div>
+                <div><strong>Serviço:</strong> ${patient.service || '—'}</div>
+                <div class="pp-kpi" style="grid-template-columns:1fr 1fr;margin-top:10px">
+                    <div><div class="text-xs">VOLUME</div><strong>${this.formatValue(formulation.volume, 'mL', 0)}</strong></div>
+                    <div><div class="text-xs">VIA</div><strong>${routeLabel(formulation.route || formulation.administrationRoute)}</strong></div>
+                    <div><div class="text-xs">PERFUSÃO</div><strong>${formulation.infusionHours || 24} h</strong></div>
+                    <div><div class="text-xs">OSMOLARIDADE</div><strong>${this.formatValue(formulation.osmolarity, 'mOsm/L', 0)}</strong></div>
+                </div>
+                <table class="pp-table">
+                    <tr><th>Proteínas</th><td style="text-align:right">${this.formatValue(formulation.proteins?.required, 'g', 1)}</td></tr>
+                    <tr><th>Glucose</th><td style="text-align:right">${this.formatValue(formulation.glucose?.required, 'g', 1)}</td></tr>
+                    <tr><th>Lípidos</th><td style="text-align:right">${this.formatValue(formulation.lipids?.required, 'g', 1)}</td></tr>
+                    <tr><th>Energia Total</th><td style="text-align:right"><strong>${this.formatValue(energy.total, 'kcal', 0)}</strong></td></tr>
+                </table>
+                <div class="pp-divider"></div>
+                <div style="text-align:center;background:#eef2f7;border:1px solid #d6deea;border-radius:8px;padding:10px;font-weight:700;">
+                    CONSERVAR A 2-8°C<br/>PROTEGER DA LUZ
+                </div>
+            </div>
+        `;
+    }
+
+    buildPreviewComponentRows(formulation) {
+        const rows = [];
+        const push = (label, comp) => {
+            if (!comp?.volume) return;
+            rows.push({ label, solution: comp.solution || '—', volume: Number(comp.volume).toFixed(1) });
+        };
+        push('Proteínas', formulation.proteins);
+        push('Lípidos', formulation.lipids);
+        push('Glucose', formulation.glucose);
+        Object.entries(formulation.electrolytes || {}).forEach(([k, comp]) => push(k[0].toUpperCase() + k.slice(1), comp));
+        push('Água Destilada', formulation.water);
+        return rows;
     }
 
     async printLabelsOnly(originalIndex = null) {

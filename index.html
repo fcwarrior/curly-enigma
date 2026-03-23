@@ -998,6 +998,29 @@
         </div>
     </div>
 
+    <div id="print-preview-modal" class="hidden fixed z-50 inset-0 overflow-y-auto" aria-modal="true" role="dialog">
+        <div class="flex items-end justify-center min-h-screen px-4 pt-4 pb-20 text-center sm:block sm:p-0">
+            <div class="fixed inset-0 bg-gray-700 bg-opacity-60" aria-hidden="true"></div>
+            <span class="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">​</span>
+            <div class="inline-block align-bottom bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-6 sm:align-middle sm:max-w-5xl sm:w-full">
+                <div class="px-4 py-4 border-b flex items-center justify-between">
+                    <h3 class="text-3xl leading-6 font-semibold text-gray-900">Pré-visualização de Impressão</h3>
+                    <div class="flex items-center gap-2">
+                        <button id="print-preview-action-btn" type="button" class="btn-primary"><i class="fas fa-print mr-2"></i>Imprimir Mapa</button>
+                        <button id="close-print-preview-modal-btn" type="button" class="btn-secondary">✕</button>
+                    </div>
+                </div>
+                <div class="px-4 py-2 border-b flex gap-3">
+                    <button type="button" id="preview-tab-map" class="nav-btn active text-blue-700 bg-blue-50">📄 Mapa de Produção</button>
+                    <button type="button" id="preview-tab-label" class="nav-btn text-gray-600">🏷️ Rótulo da Bolsa</button>
+                </div>
+                <div class="max-h-[78vh] overflow-auto bg-gray-100 p-6">
+                    <div id="print-preview-content" class="print-preview-sheet"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Include Javascript file - Defer ensures it runs after HTML is parsed -->
     <script src="script.js" defer></script>
 

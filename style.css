@@ -463,6 +463,75 @@ tbody tr:hover:not(.no-results-row) { /* Don't apply hover to no-results row */
     font-weight: 600;
 }
 
+.print-preview-sheet {
+    max-width: 760px;
+    margin: 0 auto;
+    background: #fff;
+    border: 1px solid #dbe3ef;
+    box-shadow: 0 2px 8px rgba(15, 23, 42, 0.08);
+    padding: 1.5rem 2rem;
+}
+
+.pp-title {
+    font-size: 2rem;
+    font-weight: 800;
+    color: #0f172a;
+    margin-bottom: 0.2rem;
+}
+
+.pp-subtitle {
+    color: #4b6382;
+    font-weight: 500;
+    margin-bottom: 1rem;
+}
+
+.pp-divider {
+    border-top: 2px solid #1e293b;
+    margin: 0.8rem 0 1rem;
+}
+
+.pp-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.5rem 1.25rem;
+    margin-bottom: 1rem;
+}
+
+.pp-kpi {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 0.5rem;
+    background: #f3f6fb;
+    border: 1px solid #d5deea;
+    border-radius: 0.5rem;
+    padding: 0.75rem;
+    margin-bottom: 1rem;
+}
+
+.pp-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.pp-table th, .pp-table td {
+    border-bottom: 1px solid #d7e0ec;
+    padding: 0.45rem 0.35rem;
+    font-size: 0.95rem;
+}
+
+.pp-table th {
+    text-align: left;
+    color: #1e3a5f;
+}
+
+.pp-label-card {
+    max-width: 520px;
+    border: 2px solid #22314d;
+    border-radius: 1rem;
+    margin: 0 auto;
+    padding: 1.2rem;
+}
+
 
 /* --- Modals --- */
 /* Basic modal structure is defined by Tailwind classes in HTML */
