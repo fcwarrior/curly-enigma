@@ -912,8 +912,9 @@ class NutriSoft {
         const solutionsNavBtn = document.getElementById('solutions-nav-btn');
         const auditLogViewBtn = document.getElementById('view-audit-logs-btn'); 
 
-        settingsNavBtn?.classList.toggle('hidden', !isAdmin);
+        settingsNavBtn?.classList.remove('hidden');
         solutionsNavBtn?.classList.remove('hidden');
+        if (settingsNavBtn) settingsNavBtn.disabled = !isAdmin;
 
         if (exportDataBtn) exportDataBtn.disabled = !(isAdmin || (isPrescriber && permissions.exportData));
         if (exportSettingsBtn) exportSettingsBtn.disabled = !isAdmin;

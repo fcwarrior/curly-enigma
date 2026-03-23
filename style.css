@@ -89,6 +89,10 @@ main {
      background-color: #2563eb; /* blue-600 or similar for hover */
      color: white; /* Ensure text is white on hover background */
 }
+.nav-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
 /* Active state defined directly in style block in HTML for dynamic class addition */
 /* .nav-btn.active is handled in the <style> tag in index.html */
 
