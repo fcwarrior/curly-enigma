@@ -65,7 +65,7 @@
                     <button id="solutions-nav-btn" class="nav-btn" title="Gerir Soluções (Admin)"> <i class="fas fa-flask mr-1"></i>Soluções </button>
                     <button id="settings-nav-btn" class="nav-btn" title="Configurações (Admin)"> <i class="fas fa-cog mr-1"></i>Configurações </button>
                     <button id="evolution-nav-btn" class="nav-btn hidden" title="Ver Evolução do Doente"> <i class="fas fa-chart-line mr-1"></i>Evolução </button>
-                    <button id="performance-nav-btn" class="nav-btn hidden" title="PharmaDash - Avaliação de desempenho individual"> <i class="fas fa-tachometer-alt mr-1"></i>PharmaDash </button>
+                    <button id="performance-nav-btn" class="nav-btn" title="Indicadores"> <i class="fas fa-chart-pie mr-1"></i>Indicadores </button>
                     <!-- Options Dropdown for Data Management -->
                     <div class="relative inline-block text-left">
                         <button id="options-menu-button" type="button" class="nav-btn inline-flex items-center" aria-haspopup="true" aria-expanded="false" title="Opções de Importação/Exportação de Dados">
@@ -168,7 +168,7 @@
                 <div class="patient-list">
                     <div class="mb-4 flex flex-wrap items-center gap-2 justify-between">
                         <h3 class="text-xl font-semibold flex items-center"><i class="fas fa-list mr-2"></i>Doentes</h3>
-                        <button type="button" class="btn-primary"><i class="fas fa-user-plus mr-2"></i>Novo Doente</button>
+                        <button type="button" id="toggle-patient-form-btn" class="btn-primary"><i class="fas fa-user-plus mr-2"></i>Novo Doente</button>
                     </div>
                     <div class="mb-4">
                         <input type="text" id="patient-search-input" placeholder="Pesquisar por nome ou processo..." class="input-field w-full">
@@ -789,7 +789,7 @@
 
         <!-- Performance Section -->
         <section id="performance-section" class="section hidden bg-white rounded-lg shadow-md p-6 mb-8">
-            <h2 class="text-2xl font-semibold mb-4 flex items-center"><i class="fas fa-tachometer-alt mr-2"></i>PharmaDash - Avaliação de desempenho individual</h2>
+            <h2 class="text-2xl font-semibold mb-4 flex items-center"><i class="fas fa-chart-pie mr-2"></i>Indicadores</h2>
             <div id="performance-stats" class="space-y-4">
                 <!-- Stats inserted by JS -->
             </div>
@@ -1016,6 +1016,27 @@
                 </div>
                 <div class="max-h-[78vh] overflow-auto bg-gray-100 p-6">
                     <div id="print-preview-content" class="print-preview-sheet"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="patient-history-modal" class="hidden fixed z-50 inset-0 overflow-y-auto" aria-modal="true" role="dialog">
+        <div class="flex items-end justify-center min-h-screen px-4 pt-4 pb-20 text-center sm:block sm:p-0">
+            <div class="fixed inset-0 bg-gray-700 bg-opacity-60" aria-hidden="true"></div>
+            <span class="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">​</span>
+            <div class="inline-block align-bottom bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-6 sm:align-middle sm:max-w-4xl sm:w-full">
+                <div class="px-4 py-4 border-b flex items-center justify-between">
+                    <h3 id="patient-history-title" class="text-lg font-semibold">Histórico Nutricional</h3>
+                    <button id="close-patient-history-modal-btn" type="button" class="btn-secondary">✕</button>
+                </div>
+                <div class="px-4 py-2 border-b flex gap-2">
+                    <button type="button" class="btn-ghost history-tab-btn active" data-tab="overview">Visão Geral</button>
+                    <button type="button" class="btn-ghost history-tab-btn" data-tab="macros">Macronutrientes</button>
+                    <button type="button" class="btn-ghost history-tab-btn" data-tab="electrolytes">Eletrólitos</button>
+                </div>
+                <div id="patient-history-content" class="p-4 bg-gray-50 min-h-[280px]">
+                    <p class="text-gray-500">Sem histórico.</p>
                 </div>
             </div>
         </div>

@@ -946,6 +946,9 @@ class NutriSoft {
 
         document.getElementById('add-patient-btn')?.addEventListener('click', this.addPatient);
         document.getElementById('clear-patient-form-btn')?.addEventListener('click', this.clearPatientForm);
+        document.getElementById('toggle-patient-form-btn')?.addEventListener('click', () => {
+            document.getElementById('patient-form')?.classList.toggle('hidden');
+        });
         document.getElementById('patient-dob')?.addEventListener('change', (e) => this.updateAgeDisplay(e.target.value));
         document.getElementById('prescription-patient')?.addEventListener('change', () => {
             const msg = document.getElementById('calc-awaiting-message');
@@ -973,6 +976,8 @@ class NutriSoft {
         document.getElementById('view-audit-logs-btn')?.addEventListener('click', () => { this.showAuditLogsModal(); this.renderAuditLogs(); });
         document.getElementById('close-audit-logs-modal-btn')?.addEventListener('click', () => { this.hideAuditLogsModal(); });
         document.getElementById('close-print-preview-modal-btn')?.addEventListener('click', () => this.hidePrintPreviewModal());
+        document.getElementById('close-patient-history-modal-btn')?.addEventListener('click', () => this.hidePatientHistoryModal());
+        document.querySelectorAll('.history-tab-btn').forEach(btn => btn.addEventListener('click', () => this.setPatientHistoryTab(btn.dataset.tab)));
         document.getElementById('preview-tab-map')?.addEventListener('click', () => this.setPreviewTab('map'));
         document.getElementById('preview-tab-label')?.addEventListener('click', () => this.setPreviewTab('label'));
         document.getElementById('print-preview-action-btn')?.addEventListener('click', () => this.printCurrentPreviewTab());
@@ -997,6 +1002,7 @@ class NutriSoft {
 
         document.getElementById('prescription-history-table')?.addEventListener('click', this.handlePrescriptionAction);
         document.getElementById('reports-table')?.addEventListener('click', this.handleReportsAction);
+        document.getElementById('reports-table')?.addEventListener('change', (event) => this.handleReportsStatusChange(event));
         document.getElementById('solutions-list')?.addEventListener('click', this.handleSolutionsAction);
         document.getElementById('patients-list')?.addEventListener('click', this.handlePatientListAction.bind(this)); 
 
@@ -1079,10 +1085,51 @@ class NutriSoft {
              this.editPatient(patientId);
              AuditLogger.log('initiateEditPatient', { patientId });
              document.getElementById('patient-name')?.focus();
+         } else if (action === 'history') {
+             this.showPatientHistoryModal(patientId);
          } else if (action === 'delete') {
              this.deletePatient(patientId);
          }
      }
+
+    showPatientHistoryModal(patientId) {
+        const patient = this.patients.find(p => p.id === patientId);
+        const modal = document.getElementById('patient-history-modal');
+        const title = document.getElementById('patient-history-title');
+        if (!modal || !patient) return;
+        if (title) title.textContent = `Histórico Nutricional — ${patient.name} (${patient.idNumber || patient.id})`;
+        this.currentHistoryPatientId = patientId;
+        modal.classList.remove('hidden');
+        document.body.classList.add('modal-open');
+        this.setPatientHistoryTab('overview');
+    }
+
+    hidePatientHistoryModal() {
+        const modal = document.getElementById('patient-history-modal');
+        if (!modal) return;
+        modal.classList.add('hidden');
+        document.body.classList.remove('modal-open');
+    }
+
+    setPatientHistoryTab(tab) {
+        const content = document.getElementById('patient-history-content');
+        if (!content) return;
+        document.querySelectorAll('.history-tab-btn').forEach(btn => btn.classList.toggle('active', btn.dataset.tab === tab));
+        const patientId = this.currentHistoryPatientId;
+        const items = (this.prescriptions || []).filter(p => p.patientId === patientId);
+        if (!items.length) {
+            content.innerHTML = '<div class="text-gray-500 p-4">Sem histórico</div>';
+            return;
+        }
+        if (tab === 'overview') {
+            content.innerHTML = `<ul class="list-disc pl-5 text-sm space-y-1">${items.slice(-10).map(p => `<li>${new Date(p.date || p.createdAt).toLocaleDateString()} · Vol ${this.formatValue(p.volume, 'mL', 0)} · ${this.formatValue(p.energy?.total, 'kcal', 0)}</li>`).join('')}</ul>`;
+        } else if (tab === 'macros') {
+            content.innerHTML = `<ul class="list-disc pl-5 text-sm space-y-1">${items.slice(-10).map(p => `<li>${new Date(p.date || p.createdAt).toLocaleDateString()} · Prot ${this.formatValue(p.formulation?.proteins?.required, 'g', 1)} · Gluc ${this.formatValue(p.formulation?.glucose?.required, 'g', 1)} · Lip ${this.formatValue(p.formulation?.lipids?.required, 'g', 1)}</li>`).join('')}</ul>`;
+        } else {
+            content.innerHTML = `<ul class="list-disc pl-5 text-sm space-y-1">${items.slice(-10).map(p => `<li>${new Date(p.date || p.createdAt).toLocaleDateString()} · Na ${this.formatValue(p.formulation?.electrolytes?.sodium?.displayRequired, 'mEq', 1)} · K ${this.formatValue(p.formulation?.electrolytes?.potassium?.required, 'mEq', 1)} · P ${this.formatValue(p.formulation?.electrolytes?.phosphorus?.required, 'mmol', 1)}</li>`).join('')}</ul>`;
+        }
+    }
+
     confirmExportData(dataType) { 
         if (confirm(`Deseja exportar ${dataType === 'all' ? 'todos os dados' : dataType === 'settings' ? 'as configurações' : 'os logs de auditoria'} para um ficheiro JSON?`)) {
             this.dataManager.exportData(dataType);
@@ -1186,12 +1233,27 @@ class NutriSoft {
              case 'print':
                  this.printPrescription(originalIndex);
                  break;
+             case 'labels':
+                 this.printLabelsOnly(originalIndex);
+                 break;
              case 'delete':
                  this.deletePrescription(originalIndex); 
                  break;
              default: console.warn("Unknown report action:", action);
          }
      }
+
+    handleReportsStatusChange(event) {
+        const select = event.target.closest('select[data-action="update-status"]');
+        if (!select) return;
+        const prepNumber = parseInt(select.dataset.prepNumber);
+        const originalIndex = this.prescriptions.findIndex(p => p.preparationNumber === prepNumber);
+        if (originalIndex < 0) return;
+        this.prescriptions[originalIndex].productionStatus = select.value;
+        this.dataManager.savePrescriptions(this.prescriptions);
+        this.renderReports();
+    }
+
     handleDataImport(event) { 
         const file = event.target.files?.[0];
         if (!file) return;
@@ -1712,6 +1774,7 @@ class NutriSoft {
             const actionsCell = row.insertCell();
             actionsCell.classList.add('whitespace-nowrap', 'p-3', 'text-right'); 
             actionsCell.innerHTML = `
+                <button data-action="history" data-id="${patient.id}" class="table-action-btn text-indigo-600 hover:text-indigo-800 mr-2 focus:outline-none focus:ring-2 focus:ring-indigo-500" title="Histórico"><i class="fas fa-history"></i></button>
                 <button data-action="edit" data-id="${patient.id}" class="table-action-btn text-blue-600 hover:text-blue-800 mr-2 focus:outline-none focus:ring-2 focus:ring-blue-500" title="Editar Doente"><i class="fas fa-edit"></i></button>
                 <button data-action="delete" data-id="${patient.id}" class="table-action-btn text-red-600 hover:text-red-800 focus:outline-none focus:ring-2 focus:ring-red-500" title="Eliminar Doente"><i class="fas fa-trash"></i></button>
             `;
@@ -3436,11 +3499,16 @@ class NutriSoft {
                 <td class="p-3">${patientNameDisplay}</td>
                 <td class="p-3">${this.formatValue(prescription.volume, 'ml', 0)}</td>
                 <td class="p-3">${routeLabel(prescription.route || prescription.formulation?.route)}</td>
-                <td class="p-3"><span class="badge">${status}</span></td>
+                <td class="p-3">
+                    <select class="input-field text-xs py-1 px-2" data-action="update-status" data-prep-number="${prescription.preparationNumber}">
+                        ${['Pendente', 'Aprovada', 'Produzida', 'Rejeitada'].map(s => `<option value="${s}" ${s === status ? 'selected' : ''}>${s}</option>`).join('')}
+                    </select>
+                </td>
                 <td class="p-3 whitespace-nowrap text-right">
                      <button data-action="view" data-prep-number="${prescription.preparationNumber}" class="table-action-btn text-blue-600 hover:text-blue-800 mr-2" title="Visualizar Detalhes"><i class="fas fa-eye"></i></button>
                      <button data-action="edit" data-prep-number="${prescription.preparationNumber}" class="table-action-btn text-yellow-600 hover:text-yellow-800 mr-2" title="Editar Prescrição"><i class="fas fa-edit"></i></button>
                      <button data-action="print" data-prep-number="${prescription.preparationNumber}" class="table-action-btn text-green-600 hover:text-green-800 mr-2" title="Imprimir Prescrição"><i class="fas fa-print"></i></button>
+                     <button data-action="labels" data-prep-number="${prescription.preparationNumber}" class="table-action-btn text-indigo-600 hover:text-indigo-800 mr-2" title="Imprimir Rótulo"><i class="fas fa-tags"></i></button>
                      <button data-action="delete" data-prep-number="${prescription.preparationNumber}" class="table-action-btn text-red-600 hover:text-red-800" title="Eliminar Prescrição"><i class="fas fa-trash"></i></button>
                  </td>`;
         });
@@ -4905,13 +4973,35 @@ class NutriSoft {
             return;
         }
         const stats = this.getPerformanceStats();
+        const total = this.prescriptions.length;
+        const byStatus = {
+            Pendente: this.prescriptions.filter(p => (p.productionStatus || 'Pendente') === 'Pendente').length,
+            Aprovada: this.prescriptions.filter(p => p.productionStatus === 'Aprovada').length,
+            Produzida: this.prescriptions.filter(p => p.productionStatus === 'Produzida').length,
+            Rejeitada: this.prescriptions.filter(p => p.productionStatus === 'Rejeitada').length
+        };
+        const volumeTotal = this.prescriptions.reduce((sum, p) => sum + (parseNum(p.volume, 0) || 0), 0);
+        const volumeMedio = total ? volumeTotal / total : 0;
         container.innerHTML = `
-            <p><strong>Doentes Adicionados:</strong> ${stats.addedPatients}</p>
-            <p><strong>Doentes Editados:</strong> ${stats.editedPatients}</p>
-            <p><strong>Doentes Excluídos:</strong> ${stats.deletedPatients}</p>
-            <p><strong>Prescrições Novas:</strong> ${stats.newPrescriptions}</p>
-            <p><strong>Prescrições Editadas:</strong> ${stats.editedPrescriptions}</p>
-            <p><strong>Prescrições Excluídas:</strong> ${stats.deletedPrescriptions}</p>
+            <div class="grid grid-cols-2 md:grid-cols-5 gap-3">
+                <div class="metric-card"><span class="metric-label">Total</span><span class="metric-value">${total}</span></div>
+                <div class="metric-card"><span class="metric-label">Pendentes</span><span class="metric-value">${byStatus.Pendente}</span></div>
+                <div class="metric-card"><span class="metric-label">Aprovadas</span><span class="metric-value">${byStatus.Aprovada}</span></div>
+                <div class="metric-card"><span class="metric-label">Produzidas</span><span class="metric-value">${byStatus.Produzida}</span></div>
+                <div class="metric-card"><span class="metric-label">Rejeitadas</span><span class="metric-value">${byStatus.Rejeitada}</span></div>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mt-4">
+                <div class="metric-card"><span class="metric-label">Volume Total Prescrito</span><span class="metric-value">${this.formatValue(volumeTotal, 'mL', 0)}</span></div>
+                <div class="metric-card"><span class="metric-label">Volume Médio/Bolsa</span><span class="metric-value">${this.formatValue(volumeMedio, 'mL', 0)}</span></div>
+                <div class="metric-card"><span class="metric-label">Doentes Registados</span><span class="metric-value">${this.patients.length}</span></div>
+            </div>
+            <div class="flex gap-2 mt-4">
+                <button type="button" class="btn-secondary" id="export-indicators-btn">Exportar Indicadores</button>
+                <button type="button" class="btn-secondary" id="export-ledger-btn">Exportar Conta-Corrente</button>
+            </div>
+            <div class="text-xs text-gray-500 mt-3">
+                Ações auditadas: +doentes ${stats.addedPatients} · edições ${stats.editedPatients} · novas prescrições ${stats.newPrescriptions}
+            </div>
         `;
     }
     editSolution(solutionName = null) {
