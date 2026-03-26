@@ -1055,6 +1055,10 @@
         </div>
     </div>
 
+    <!-- Domain/shared modules loaded before app bootstrap -->
+    <script src="src/shared/utils/number.js" defer></script>
+    <script src="src/domain/calculations/guideline.service.js" defer></script>
+    <script src="src/domain/calculations/clinical-validation.engine.js" defer></script>
     <!-- Include Javascript file - Defer ensures it runs after HTML is parsed -->
     <script src="script.js" defer></script>
 

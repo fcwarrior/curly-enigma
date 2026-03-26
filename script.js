@@ -62,6 +62,14 @@ function roundVolume(value, decimalPlaces = 1) {
     return Math.round(parsed * factor) / factor;
 }
 
+const sharedNumberModule = window.NutriSoftSharedNumber || null;
+if (sharedNumberModule) {
+    normalizeNumberString = sharedNumberModule.normalizeNumberString;
+    parseNum = sharedNumberModule.parseNum;
+    isValidNumericInput = sharedNumberModule.isValidNumericInput;
+    roundVolume = sharedNumberModule.roundVolume;
+}
+
 
 function normalizeAdministrationRoute(routeValue) {
     const normalized = String(routeValue || '').toLowerCase().trim();
@@ -150,7 +158,7 @@ function mmToPt(mm) {
  * Nutrition guideline tables used to provide quick suggestions according to patient profile.
  * Values are expressed as ranges so that the mid value can be surfaced to the user.
  */
-const GUIDELINE_TABLES = {
+let GUIDELINE_TABLES = {
     adult: {
         label: 'Adulto',
         protein_g_per_kg: [1.0, 1.3],
@@ -219,12 +227,19 @@ const GUIDELINE_TABLES = {
     }
 };
 
-const DEFAULT_GUIDELINE_ID = 'adult';
+let DEFAULT_GUIDELINE_ID = 'adult';
 
 function midpoint(range = []) {
     if (!Array.isArray(range) || range.length === 0) return 0;
     if (range.length === 1) return range[0];
     return (range[0] + range[range.length - 1]) / 2;
+}
+
+const guidelineModule = window.NutriSoftGuidelineService || null;
+if (guidelineModule) {
+    GUIDELINE_TABLES = guidelineModule.GUIDELINE_TABLES || GUIDELINE_TABLES;
+    DEFAULT_GUIDELINE_ID = guidelineModule.DEFAULT_GUIDELINE_ID || DEFAULT_GUIDELINE_ID;
+    midpoint = guidelineModule.midpoint || midpoint;
 }
 
 /**
