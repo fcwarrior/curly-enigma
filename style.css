@@ -488,6 +488,14 @@ tbody tr:hover:not(.no-results-row) { /* Don't apply hover to no-results row */
     margin-bottom: 0.2rem;
 }
 
+.pp-topline {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.75rem;
+    color: #4b6382;
+    margin-bottom: 0.4rem;
+}
+
 .pp-subtitle {
     color: #4b6382;
     font-weight: 500;
@@ -539,6 +547,26 @@ tbody tr:hover:not(.no-results-row) { /* Don't apply hover to no-results row */
     border-radius: 1rem;
     margin: 0 auto;
     padding: 1.2rem;
+}
+
+.pp-signatures {
+    margin-top: 1.2rem;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 2rem;
+    font-size: 0.9rem;
+}
+
+.pp-sign-line {
+    border-bottom: 1px solid #31415f;
+    margin: 0.8rem 0 0.5rem;
+}
+
+.pp-footer {
+    margin-top: 1rem;
+    font-size: 0.72rem;
+    color: #6b7280;
+    text-align: right;
 }
 
 

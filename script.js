@@ -3934,8 +3934,15 @@ class NutriSoft {
         const patient = formulation?.patient || {};
         const energy = formulation?.energy || {};
         const components = this.buildPreviewComponentRows(formulation);
+        const now = new Date();
+        const nowText = `${now.toLocaleDateString('pt-PT')} ${now.toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' })}`;
         return `
             <div>
+                <div class="pp-topline">
+                    <span>${nowText}</span>
+                    <span>NutriSoft</span>
+                    <span>#Prep ${prepNumber || '—'}</span>
+                </div>
                 <div class="pp-title">MAPA DE PRODUÇÃO</div>
                 <div class="pp-subtitle">Nutrição Parentérica</div>
                 <div class="pp-divider"></div>
@@ -3955,11 +3962,24 @@ class NutriSoft {
                     <div><div class="text-xs">GIR</div><strong>${energy.GIR ? energy.GIR.toFixed(2) : '—'} mg/kg/min</strong></div>
                 </div>
                 <table class="pp-table">
-                    <thead><tr><th>Ordem</th><th>Componente</th><th>Solução</th><th style="text-align:right">Volume (mL)</th><th>Check</th></tr></thead>
+                    <thead><tr><th>Ordem</th><th>Componente</th><th>Solução</th><th>Lote</th><th style="text-align:right">Quantidade</th><th>Check</th></tr></thead>
                     <tbody>
-                        ${components.map((r, i) => `<tr><td>${i + 1}</td><td>${r.label}</td><td>${r.solution}</td><td style="text-align:right">${r.volume}</td><td>☐</td></tr>`).join('')}
+                        ${components.map((r, i) => `<tr><td>${i + 1}</td><td><strong>${r.label}</strong></td><td>${r.solution}</td><td>${r.lot || '-'}</td><td style="text-align:right"><strong>${r.volume} mL</strong></td><td>☐</td></tr>`).join('')}
                     </tbody>
                 </table>
+                <div class="pp-signatures">
+                    <div>
+                        <strong>Preparador (Assinatura)</strong>
+                        <div class="pp-sign-line"></div>
+                        <div>Data: __/__/____ &nbsp;&nbsp; Hora: __:__</div>
+                    </div>
+                    <div>
+                        <strong>Conferente (Assinatura)</strong>
+                        <div class="pp-sign-line"></div>
+                        <div>Data: __/__/____ &nbsp;&nbsp; Hora: __:__</div>
+                    </div>
+                </div>
+                <div class="pp-footer">https://nutrisoft.local · 1/1</div>
             </div>
         `;
     }
@@ -3969,7 +3989,7 @@ class NutriSoft {
         const energy = formulation?.energy || {};
         return `
             <div class="pp-label-card">
-                <div style="text-align:center;font-size:42px;font-weight:800;letter-spacing:1px;">NUTRIÇÃO PARENTÉRICA</div>
+                <div style="text-align:center;font-size:56px;font-weight:800;letter-spacing:1px;">NUTRIÇÃO PARENTÉRICA</div>
                 <div style="text-align:center;font-size:22px;font-weight:700;letter-spacing:1px;">USO INTRAVENOSO</div>
                 <div class="pp-divider"></div>
                 <div><strong>Doente:</strong> ${patientName || patient.name || '—'}</div>
@@ -3990,20 +4010,37 @@ class NutriSoft {
                 <div style="text-align:center;background:#eef2f7;border:1px solid #d6deea;border-radius:8px;padding:10px;font-weight:700;">
                     CONSERVAR A 2-8°C<br/>PROTEGER DA LUZ
                 </div>
+                <div class="pp-footer">https://nutrisoft.local · 1/1</div>
             </div>
         `;
     }
 
     buildPreviewComponentRows(formulation) {
         const rows = [];
+        const lots = formulation?.preparationMeta?.componentLots || {};
+        const lotByLabel = {
+            'Proteínas': lots.proteins?.lotNumber,
+            'Lípidos': lots.lipids?.lotNumber,
+            'Glucose': lots.glucose?.lotNumber,
+            'Fósforo': lots.phosphorus?.lotNumber,
+            'Sódio': lots.sodium?.lotNumber,
+            'Potássio': lots.potassium?.lotNumber,
+            'Magnésio': lots.magnesium?.lotNumber,
+            'Cálcio': lots.calcium?.lotNumber,
+            'Água Destilada': lots.water?.lotNumber
+        };
         const push = (label, comp) => {
             if (!comp?.volume) return;
-            rows.push({ label, solution: comp.solution || '—', volume: Number(comp.volume).toFixed(1) });
+            rows.push({ label, solution: comp.solution || '—', lot: lotByLabel[label] || '-', volume: Number(comp.volume).toFixed(1) });
         };
         push('Proteínas', formulation.proteins);
         push('Lípidos', formulation.lipids);
         push('Glucose', formulation.glucose);
-        Object.entries(formulation.electrolytes || {}).forEach(([k, comp]) => push(k[0].toUpperCase() + k.slice(1), comp));
+        push('Fósforo', formulation.electrolytes?.phosphorus);
+        push('Sódio', formulation.electrolytes?.sodium);
+        push('Potássio', formulation.electrolytes?.potassium);
+        push('Magnésio', formulation.electrolytes?.magnesium);
+        push('Cálcio', formulation.electrolytes?.calcium);
         push('Água Destilada', formulation.water);
         return rows;
     }
