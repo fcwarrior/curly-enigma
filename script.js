@@ -1,6 +1,248 @@
 // --- script.js ---
 
 /**
+ * Normalizes numeric input allowing both comma and dot as decimal separators.
+ * @param {string|number|null|undefined} value
+ * @returns {string}
+ */
+function normalizeNumberString(value) {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+        return String(value);
+    }
+    if (value === null || value === undefined) {
+        return '';
+    }
+    return String(value).trim().replace(/\s+/g, '').replace(',', '.');
+}
+
+/**
+ * Parses a numeric value accepting either comma or dot decimals.
+ * Falls back to zero when parsing fails, ensuring calculations remain robust.
+ * @param {string|number|null|undefined} value
+ * @param {number} [defaultValue=0]
+ * @returns {number}
+ */
+function parseNum(value, defaultValue = 0) {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+        return value;
+    }
+    const normalized = normalizeNumberString(value);
+    if (normalized === '') {
+        return defaultValue;
+    }
+    const parsed = Number(normalized);
+    return Number.isFinite(parsed) ? parsed : defaultValue;
+}
+
+/**
+ * Determines whether a raw input string can be parsed into a finite number.
+ * @param {string|number|null|undefined} value
+ * @returns {boolean}
+ */
+function isValidNumericInput(value) {
+    const normalized = normalizeNumberString(value);
+    if (normalized === '') return false;
+    const parsed = Number(normalized);
+    return Number.isFinite(parsed);
+}
+
+/**
+ * Rounds component volumes consistently to the desired decimal places.
+ * Ensures negative and NaN values are clamped to zero.
+ * @param {number} value
+ * @param {number} [decimalPlaces=1]
+ * @returns {number}
+ */
+function roundVolume(value, decimalPlaces = 1) {
+    const parsed = parseNum(value, 0);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+        return 0;
+    }
+    const factor = Math.pow(10, decimalPlaces);
+    return Math.round(parsed * factor) / factor;
+}
+
+const sharedNumberModule = window.NutriSoftSharedNumber || null;
+if (sharedNumberModule) {
+    normalizeNumberString = sharedNumberModule.normalizeNumberString;
+    parseNum = sharedNumberModule.parseNum;
+    isValidNumericInput = sharedNumberModule.isValidNumericInput;
+    roundVolume = sharedNumberModule.roundVolume;
+}
+
+
+function normalizeAdministrationRoute(routeValue) {
+    const normalized = String(routeValue || '').toLowerCase().trim();
+    if (['peripheral', 'periférica', 'periferica'].includes(normalized)) return 'peripheral';
+    if (['central'].includes(normalized)) return 'central';
+    return 'central';
+}
+
+function routeLabel(routeValue) {
+    return normalizeAdministrationRoute(routeValue) === 'peripheral' ? 'Periférica' : 'Central';
+}
+
+function hashString(input) {
+    const text = String(input || '');
+    let hash = 2166136261;
+    for (let i = 0; i < text.length; i++) {
+        hash ^= text.charCodeAt(i);
+        hash += (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24);
+    }
+    return hash >>> 0;
+}
+
+/**
+ * Shared PDF layout tokens to keep worksheet and labels consistent and maintainable.
+ */
+const PDF_THEME = {
+    margins: { top: 12, left: 12, right: 12, bottom: 14 },
+    palette: {
+        border: [33, 37, 41],
+        subtleBorder: [210, 214, 220],
+        headerFill: [245, 247, 250],
+        warning: [255, 204, 128],
+        error: [236, 112, 99]
+    },
+    fonts: {
+        family: 'helvetica',
+        title: 15,
+        section: 10,
+        base: 8.5,
+        small: 8,
+        label: 9
+    }
+};
+
+/**
+ * Label templates are deterministic layouts expressed in millimetres with safe areas
+ * for both laser (A4 multi-up) and térmica (1-up) printing profiles.
+ */
+const LABEL_TEMPLATES = {
+    main: {
+        id: 'main',
+        width: 90,
+        height: 50,
+        padding: 5,
+        gapX: 10,
+        gapY: 10,
+        pageMarginX: 10,
+        pageMarginY: 10,
+        safeArea: { x: 2, y: 2, w: 86, h: 46 },
+        minFont: 6.5
+    },
+    small: {
+        id: 'small',
+        width: 70,
+        height: 35,
+        padding: 4,
+        gapX: 8,
+        gapY: 8,
+        pageMarginX: 12,
+        pageMarginY: 12,
+        safeArea: { x: 2, y: 2, w: 66, h: 31 },
+        minFont: 6
+    }
+};
+
+/**
+ * Converts millimetres to PDF points (1 pt = 1/72 in) to aid calibration overlays.
+ * @param {number} mm
+ * @returns {number}
+ */
+function mmToPt(mm) {
+    return (mm / 25.4) * 72;
+}
+
+/**
+ * Nutrition guideline tables used to provide quick suggestions according to patient profile.
+ * Values are expressed as ranges so that the mid value can be surfaced to the user.
+ */
+let GUIDELINE_TABLES = {
+    adult: {
+        label: 'Adulto',
+        protein_g_per_kg: [1.0, 1.3],
+        glucose_mg_kg_min: [3, 4.5],
+        lipid_g_per_kg: [0.7, 1.0],
+        sodium_mEq_per_kg: [1.0, 2.0],
+        potassium_mEq_per_kg: [0.8, 1.2],
+        magnesium_mEq_per_kg: [0.1, 0.2],
+        calcium_mEq_per_kg: [0.05, 0.2],
+        phosphorus_mmol_per_kg: [0.3, 0.6]
+    },
+    renal: {
+        label: 'Insuficiência Renal',
+        protein_g_per_kg: [0.8, 1.2],
+        glucose_mg_kg_min: [3, 4],
+        lipid_g_per_kg: [0.7, 1.0],
+        sodium_mEq_per_kg: [0.5, 1.0],
+        potassium_mEq_per_kg: [0.5, 1.0],
+        magnesium_mEq_per_kg: [0.05, 0.1],
+        calcium_mEq_per_kg: [0.05, 0.12],
+        phosphorus_mmol_per_kg: [0.2, 0.4]
+    },
+    hepatic: {
+        label: 'Insuficiência Hepática',
+        protein_g_per_kg: [1.2, 1.5],
+        glucose_mg_kg_min: [3, 4.5],
+        lipid_g_per_kg: [0.7, 1.0],
+        sodium_mEq_per_kg: [1.0, 1.5],
+        potassium_mEq_per_kg: [0.7, 1.0],
+        magnesium_mEq_per_kg: [0.1, 0.2],
+        calcium_mEq_per_kg: [0.05, 0.15],
+        phosphorus_mmol_per_kg: [0.3, 0.5]
+    },
+    critical: {
+        label: 'Doente Crítico',
+        protein_g_per_kg: [1.5, 2.0],
+        glucose_mg_kg_min: [4, 5.5],
+        lipid_g_per_kg: [1.0, 1.5],
+        sodium_mEq_per_kg: [1.0, 2.0],
+        potassium_mEq_per_kg: [1.0, 1.5],
+        magnesium_mEq_per_kg: [0.15, 0.25],
+        calcium_mEq_per_kg: [0.08, 0.2],
+        phosphorus_mmol_per_kg: [0.4, 0.7]
+    },
+    pediatric: {
+        label: 'Pediátrico',
+        protein_g_per_kg: [1.5, 2.5],
+        glucose_mg_kg_min: [4, 6],
+        lipid_g_per_kg: [1.5, 2.5],
+        sodium_mEq_per_kg: [2.0, 4.0],
+        potassium_mEq_per_kg: [1.5, 3.0],
+        magnesium_mEq_per_kg: [0.2, 0.3],
+        calcium_mEq_per_kg: [0.2, 0.35],
+        phosphorus_mmol_per_kg: [0.7, 1.2]
+    },
+    neonate: {
+        label: 'Neonato',
+        protein_g_per_kg: [2.5, 3.5],
+        glucose_mg_kg_min: [5, 8],
+        lipid_g_per_kg: [2.0, 3.0],
+        sodium_mEq_per_kg: [2.0, 4.0],
+        potassium_mEq_per_kg: [1.5, 3.0],
+        magnesium_mEq_per_kg: [0.3, 0.4],
+        calcium_mEq_per_kg: [0.25, 0.45],
+        phosphorus_mmol_per_kg: [1.0, 1.5]
+    }
+};
+
+let DEFAULT_GUIDELINE_ID = 'adult';
+
+function midpoint(range = []) {
+    if (!Array.isArray(range) || range.length === 0) return 0;
+    if (range.length === 1) return range[0];
+    return (range[0] + range[range.length - 1]) / 2;
+}
+
+const guidelineModule = window.NutriSoftGuidelineService || null;
+if (guidelineModule) {
+    GUIDELINE_TABLES = guidelineModule.GUIDELINE_TABLES || GUIDELINE_TABLES;
+    DEFAULT_GUIDELINE_ID = guidelineModule.DEFAULT_GUIDELINE_ID || DEFAULT_GUIDELINE_ID;
+    midpoint = guidelineModule.midpoint || midpoint;
+}
+
+/**
  * Manages data persistence using localStorage.
  * Handles getting, saving, exporting, and importing application data.
  */
@@ -13,7 +255,78 @@ class DataManager {
         this.settingsKey = 'settings';
         this.userNameKey = 'userName';
         this.auditLogsKey = 'auditLogs';
+        this.lotsKey = 'lots';
+        this.dbName = 'nutrisoftDB';
+        this.dbVersion = 1;
+        this.storeName = 'kv';
+        this.memoryStore = {};
+        this.dbReady = this.initIndexedDB();
         console.log("DataManager instance created.");
+    }
+
+    initIndexedDB() {
+        return new Promise((resolve) => {
+            if (!('indexedDB' in window)) return resolve(false);
+            try {
+                const req = indexedDB.open(this.dbName, this.dbVersion);
+                req.onupgradeneeded = () => {
+                    const db = req.result;
+                    if (!db.objectStoreNames.contains(this.storeName)) {
+                        db.createObjectStore(this.storeName, { keyPath: 'key' });
+                    }
+                };
+                req.onsuccess = async () => {
+                    this.db = req.result;
+                    await this.loadIndexedDbSnapshot();
+                    await this.migrateLocalStorageToIndexedDB();
+                    resolve(true);
+                };
+                req.onerror = () => resolve(false);
+            } catch {
+                resolve(false);
+            }
+        });
+    }
+
+    async loadIndexedDbSnapshot() {
+        if (!this.db) return;
+        await new Promise((resolve) => {
+            const tx = this.db.transaction(this.storeName, 'readonly');
+            const store = tx.objectStore(this.storeName);
+            const req = store.getAll();
+            req.onsuccess = () => {
+                (req.result || []).forEach(entry => {
+                    this.memoryStore[entry.key] = entry.value;
+                });
+                resolve();
+            };
+            req.onerror = () => resolve();
+        });
+    }
+
+    async migrateLocalStorageToIndexedDB() {
+        const keys = [this.patientsKey, this.prescriptionsKey, this.solutionsKey, this.preparationCounterKey, this.settingsKey, this.userNameKey, this.auditLogsKey, this.lotsKey];
+        keys.forEach((key) => {
+            const localValue = localStorage.getItem(key);
+            if (localValue && this.memoryStore[key] === undefined) {
+                try {
+                    this.memoryStore[key] = JSON.parse(localValue);
+                    this.persistToIndexedDB(key, this.memoryStore[key]);
+                } catch {
+                    // ignore malformed
+                }
+            }
+        });
+    }
+
+    persistToIndexedDB(key, value) {
+        if (!this.db) return;
+        try {
+            const tx = this.db.transaction(this.storeName, 'readwrite');
+            tx.objectStore(this.storeName).put({ key, value, updatedAt: new Date().toISOString() });
+        } catch (error) {
+            console.warn('IndexedDB persist failed:', error);
+        }
     }
 
     /**
@@ -26,8 +339,10 @@ class DataManager {
             const rawData = localStorage.getItem(key);
             if (rawData) {
                 const parsedData = JSON.parse(rawData);
+                this.memoryStore[key] = parsedData;
                 return parsedData;
             }
+            if (this.memoryStore[key] !== undefined) return this.memoryStore[key];
             return null;
         } catch (error) {
             console.error(`DataManager: Error getting data for key '${key}':`, error);
@@ -45,6 +360,8 @@ class DataManager {
         try {
             const jsonData = JSON.stringify(data, null, 2);
             localStorage.setItem(key, jsonData);
+            this.memoryStore[key] = data;
+            this.persistToIndexedDB(key, data);
             console.log(`DataManager.saveData: Data for key '${key}' successfully saved to localStorage.`);
         } catch (error) {
             console.error(`DataManager: Error saving data for key '${key}':`, error);
@@ -71,9 +388,19 @@ class DataManager {
             solutions: this.getSolutions(),
             settings: this.getSettings(),
             userName: this.getUserName(),
-            auditLogs: this.getAuditLogs()
+            auditLogs: this.getAuditLogs(),
+            lots: this.getLots()
         };
         this.exportData('all', allData);
+    }
+
+
+    getLots() {
+        return this.getData(this.lotsKey) || [];
+    }
+
+    saveLots(lots) {
+        this.saveData(this.lotsKey, lots);
     }
 
     getUserName() {
@@ -114,16 +441,79 @@ class DataManager {
             autoSaveEnabled: false,
             autoExportEnabled: false,
             autoSaveIntervalMinutes: 5,
-            accessLevel: 'basic',
-            permissions: { exportData: false },
-            osmolarityLimits: { peripheral: 900, central: 1500 }
+            accessLevel: 'admin',
+            permissions: { exportData: true },
+            osmolarityLimits: { peripheral: 900, central: 1500 },
+            clinicalValidation: {
+                protein: { warning: 2.5, highWarning: 4.0 },
+                lipid: { warning: 2.5, highWarning: 4.0 },
+                gir: { warning: 7, highWarning: 14 },
+                caPhos: { warning: 30, hard: 45 },
+                peripheralOsmAlertRatio: 0.9
+            },
+            patientCategories: [
+                {
+                    id: 'cat-adult',
+                    name: 'Adulto',
+                    ageStart: 18,
+                    ageEnd: 99,
+                    substanceLimits: {
+                        nitrogen: { softUpper: 2, hardUpper: 2.5, unit: 'g/kg' },
+                        glucose_GIR: { softUpper: 5, hardUpper: 7, unit: 'mg/kg/min' },
+                        calcium: { hardUpper: 0.2, unit: 'mEq/kg' }
+                    }
+                }
+            ],
+            protocols: [
+                {
+                    id: 'proto-adult-standard',
+                    name: 'Adulto - Protocolo Padrão',
+                    patientCategoryId: 'cat-adult',
+                    dailyTemplates: [
+                        {
+                            day: 1,
+                            inputs: {
+                                nitrogen: 8,
+                                glucose: 150,
+                                lipids: 70,
+                                sodium: 80,
+                                potassium: 60,
+                                calcium: 9.3,
+                                magnesium: 16,
+                                phosphorus: 20,
+                                traceElements: 10
+                            }
+                        }
+                    ]
+                }
+            ]
         };
-        const savedSettings = this.getData(this.settingsKey);
+        const savedSettings = this.getData(this.settingsKey) || {};
         return {
             ...defaults,
             ...savedSettings,
-            permissions: { ...defaults.permissions, ...(savedSettings?.permissions || {}) },
-            osmolarityLimits: { ...defaults.osmolarityLimits, ...(savedSettings?.osmolarityLimits || {}) }
+            permissions: { ...defaults.permissions, ...(savedSettings.permissions || {}) },
+            osmolarityLimits: { ...defaults.osmolarityLimits, ...(savedSettings.osmolarityLimits || {}) },
+            clinicalValidation: {
+                ...defaults.clinicalValidation,
+                ...(savedSettings.clinicalValidation || {}),
+                protein: {
+                    ...defaults.clinicalValidation.protein,
+                    ...(savedSettings.clinicalValidation?.protein || {})
+                },
+                lipid: {
+                    ...defaults.clinicalValidation.lipid,
+                    ...(savedSettings.clinicalValidation?.lipid || {})
+                },
+                gir: {
+                    ...defaults.clinicalValidation.gir,
+                    ...(savedSettings.clinicalValidation?.gir || {})
+                },
+                caPhos: {
+                    ...defaults.clinicalValidation.caPhos,
+                    ...(savedSettings.clinicalValidation?.caPhos || {})
+                }
+            }
         };
     }
 
@@ -159,7 +549,8 @@ class DataManager {
                         solutions: this.getSolutions(),
                         settings: this.getSettings(),
                         userName: this.getUserName(),
-                        auditLogs: this.getAuditLogs()
+                        auditLogs: this.getAuditLogs(),
+            lots: this.getLots()
                      }; 
                     filenameSuffix = '-all-data';
                     break;
@@ -205,6 +596,7 @@ class DataManager {
                 if (jsonData.settings && typeof jsonData.settings === 'object') { this.saveSettings(jsonData.settings); importedSomething = true; }
                 if (jsonData.userName && typeof jsonData.userName === 'string') { this.saveUserName(jsonData.userName); importedSomething = true; }
                 if (jsonData.auditLogs && Array.isArray(jsonData.auditLogs)) { this.saveAuditLogs(jsonData.auditLogs); importedSomething = true; }
+                if (jsonData.lots && Array.isArray(jsonData.lots)) { this.saveLots(jsonData.lots); importedSomething = true; }
                 if (!importedSomething) { this.displayNotification('Ficheiro de dados não contém secções válidas.', 'warning'); return false; }
                 this.displayNotification('Dados importados. Recarregue a aplicação.', 'success');
                 return true;
@@ -232,7 +624,31 @@ class DataManager {
     displayNotification(message, type = 'info') {
         const prefix = type.toUpperCase();
         console.log(`[${prefix}] Notification: ${message}`);
-        alert(`${prefix}: ${message}`);
+        const hostId = 'notification-host';
+        let host = document.getElementById(hostId);
+        if (!host) {
+            host = document.createElement('div');
+            host.id = hostId;
+            host.style.position = 'fixed';
+            host.style.top = '12px';
+            host.style.right = '12px';
+            host.style.zIndex = '9999';
+            host.style.display = 'flex';
+            host.style.flexDirection = 'column';
+            host.style.gap = '8px';
+            document.body.appendChild(host);
+        }
+        const toast = document.createElement('div');
+        toast.textContent = `${prefix}: ${message}`;
+        toast.style.padding = '10px 12px';
+        toast.style.borderRadius = '8px';
+        toast.style.color = '#fff';
+        toast.style.fontSize = '13px';
+        toast.style.maxWidth = '360px';
+        toast.style.boxShadow = '0 8px 24px rgba(0,0,0,0.2)';
+        toast.style.background = type === 'error' ? '#dc2626' : type === 'warning' ? '#d97706' : type === 'success' ? '#059669' : '#2563eb';
+        host.appendChild(toast);
+        setTimeout(() => toast.remove(), 5000);
     }
 }
 
@@ -256,7 +672,9 @@ class NutriSoft {
     constructor() {
         console.log("NutriSoft constructor starting...");
         this.dataManager = new DataManager();
-        this.patients = []; this.prescriptions = []; this.solutions = {}; this.settings = {}; this.userName = '';
+        this.patients = []; this.prescriptions = []; this.solutions = {}; this.lots = []; this.settings = {}; this.userName = '';
+        this.selectedLotMap = {};
+        this.currentPreviewData = null;
         this.currentPrescriptionIndex = null; this.autoSaveInterval = null; this.evolutionChartInstance = null; this.components = {};
         this.loadInitialData();
         this.applySettings();
@@ -270,7 +688,7 @@ class NutriSoft {
             'handleRouteChange', 'handleDataImport', 'handleSettingsImport', 'handlePrescriptionAction',
             'handleReportsAction', 'handleSolutionsAction', 'saveSettings', 'addPatient',
             'clearPatientForm', 'calculateFormulation', 'savePrescription', 'printPrescription',
-            'saveSolution', 'clearSolutionForm', 'handlePatientListAction'
+            'saveSolution', 'clearSolutionForm', 'handlePatientListAction', 'addLot', 'handleLotAction'
         ];
         methodsToBind.forEach(method => {
             if (typeof this[method] === 'function') {
@@ -286,9 +704,17 @@ class NutriSoft {
         this.patients = this.dataManager.getPatients();
         this.prescriptions = this.dataManager.getPrescriptions();
         this.solutions = this.dataManager.getSolutions();
+        this.lots = this.dataManager.getLots();
         this.settings = this.dataManager.getSettings(); // Ensure settings are loaded early
         this.userName = this.dataManager.getUserName();
-        console.log("NutriSoft.loadInitialData finished. Patients:", this.patients.length, "Prescriptions:", this.prescriptions.length, "Solutions:", Object.keys(this.solutions).length);
+        if (!Array.isArray(this.patients) || this.patients.length === 0) {
+            this.patients = [
+                { id: 1, idNumber: '0001', name: 'Paciente A', service: 'Medicina Interna', weight: 70, height: 175, bmi: 22.9, condition: 'stable' },
+                { id: 2, idNumber: '0002', name: 'Paciente B', service: 'Cirurgia', weight: 62, height: 168, bmi: 22.0, condition: 'stable' }
+            ];
+            this.dataManager.savePatients(this.patients);
+        }
+        console.log("NutriSoft.loadInitialData finished. Patients:", this.patients.length, "Prescriptions:", this.prescriptions.length, "Solutions:", Object.keys(this.solutions).length, "Lots:", this.lots.length);
     }
     init() { 
         console.log("NutriSoft.init starting...");
@@ -351,12 +777,12 @@ class NutriSoft {
     handleRouteChange() { 
         const hash = window.location.hash;
         console.log(`NutriSoft.handleRouteChange: Hash changed to: ${hash}`);
-        const sectionId = hash.substring(1) || 'patients'; // Default to 'patients'
+        const sectionId = hash.substring(1) || 'prescription'; // Default to calculator
         this.showSection(sectionId);
     }
     updateNavButtons(sectionId) { 
         // console.log(`NutriSoft.updateNavButtons: Updating for section '${sectionId}'`);
-        document.querySelectorAll('.nav-btn').forEach(btn => {
+        document.querySelectorAll('.nav-btn[id$="-nav-btn"]').forEach(btn => {
             btn.classList.remove('active', 'bg-blue-700', 'text-white'); 
         });
         const activeBtn = document.getElementById(`${sectionId}-nav-btn`);
@@ -366,6 +792,25 @@ class NutriSoft {
         } else {
             console.warn(`NutriSoft.updateNavButtons: Active button for section '${sectionId}' (ID: ${sectionId}-nav-btn) not found.`);
         }
+    }
+    updatePageContext(sectionId) {
+        const titleEl = document.getElementById('app-page-title');
+        const subtitleEl = document.getElementById('app-page-subtitle');
+        if (!titleEl || !subtitleEl) return;
+
+        const section = document.getElementById(`${sectionId}-section`);
+        const heading = section?.querySelector('h2');
+        const fallbackTitles = {
+            prescription: 'Calculadora NP',
+            reports: 'Produção',
+            patients: 'Doentes',
+            solutions: 'Soluções',
+            settings: 'Configurações',
+            evolution: 'Evolução',
+            performance: 'Indicadores'
+        };
+        titleEl.textContent = heading?.textContent?.trim() || fallbackTitles[sectionId] || 'NutriSoft';
+        subtitleEl.textContent = `Módulo ativo: ${titleEl.textContent}`;
     }
     showSection(sectionId) { 
         console.log(`NutriSoft.showSection: Attempting to show section: '${sectionId}'`);
@@ -382,6 +827,8 @@ class NutriSoft {
 
         if (sectionShown) {
             this.updateNavButtons(sectionId);
+            this.updatePageContext(sectionId);
+            document.body.classList.remove('sidebar-open');
             switch (sectionId) {
                 case 'reports': this.renderReports(); break;
                 case 'prescription':
@@ -399,12 +846,12 @@ class NutriSoft {
             }
         } else {
             console.warn(`NutriSoft.showSection: Section element NOT FOUND for ID: '${sectionId}-section'.`);
-            if (sectionId !== 'patients') { 
-                 console.warn(`NutriSoft.showSection: Fallback to 'patients' section.`);
-                 this.showSection('patients'); 
-                 window.location.hash = 'patients'; 
+            if (sectionId !== 'prescription') { 
+                 console.warn(`NutriSoft.showSection: Fallback to 'prescription' section.`);
+                 this.showSection('prescription'); 
+                 window.location.hash = 'prescription'; 
             } else {
-                this.dataManager.displayNotification("Erro crítico: Secção 'patients' não encontrada. A aplicação pode não funcionar corretamente.", "error");
+                this.dataManager.displayNotification("Erro crítico: Secção 'prescription' não encontrada. A aplicação pode não funcionar corretamente.", "error");
             }
         }
     }
@@ -451,7 +898,7 @@ class NutriSoft {
         if (autoSaveIntervalInput) autoSaveIntervalInput.value = settings.autoSaveIntervalMinutes ?? 5; else console.warn("loadSettings: autoSaveIntervalInput not found");
         if (autoSaveCheckbox) autoSaveCheckbox.checked = settings.autoSaveEnabled ?? false; else console.warn("loadSettings: autoSaveCheckbox not found");
         if (autoExportCheckbox) autoExportCheckbox.checked = settings.autoExportEnabled ?? false; else console.warn("loadSettings: autoExportCheckbox not found");
-        if (accessLevelSelect) accessLevelSelect.value = settings.accessLevel ?? 'basic'; else console.warn("loadSettings: accessLevelSelect not found");
+        if (accessLevelSelect) accessLevelSelect.value = settings.accessLevel ?? 'admin'; else console.warn("loadSettings: accessLevelSelect not found");
         if (permExportCheckbox) permExportCheckbox.checked = settings.permissions?.exportData ?? false; else console.warn("loadSettings: permExportCheckbox not found");
     }
     saveSettings() { 
@@ -467,7 +914,7 @@ class NutriSoft {
         this.settings.autoSaveIntervalMinutes = Number(autoSaveIntervalInput?.value) || this.settings.autoSaveIntervalMinutes || 5;
         this.settings.autoSaveEnabled = autoSaveCheckbox?.checked ?? false;
         this.settings.autoExportEnabled = autoExportCheckbox?.checked ?? false;
-        this.settings.accessLevel = accessLevelSelect?.value ?? this.settings.accessLevel ?? 'basic';
+        this.settings.accessLevel = accessLevelSelect?.value ?? this.settings.accessLevel ?? 'admin';
         this.settings.permissions = this.settings.permissions || {}; 
         this.settings.permissions.exportData = permExportCheckbox?.checked ?? false;
 
@@ -485,7 +932,7 @@ class NutriSoft {
         this.checkAccessPermissions();
     }
     checkAccessPermissions() { 
-        const currentAccessLevel = this.settings.accessLevel || 'basic';
+        const currentAccessLevel = this.settings.accessLevel || 'admin';
         const permissions = this.settings.permissions || {};
         const isAdmin = currentAccessLevel === 'admin';
         const isPrescriber = currentAccessLevel === 'prescriber';
@@ -501,8 +948,9 @@ class NutriSoft {
         const solutionsNavBtn = document.getElementById('solutions-nav-btn');
         const auditLogViewBtn = document.getElementById('view-audit-logs-btn'); 
 
-        settingsNavBtn?.classList.toggle('hidden', !isAdmin);
-        solutionsNavBtn?.classList.toggle('hidden', !isAdmin);
+        settingsNavBtn?.classList.remove('hidden');
+        solutionsNavBtn?.classList.remove('hidden');
+        if (settingsNavBtn) settingsNavBtn.disabled = !isAdmin;
 
         if (exportDataBtn) exportDataBtn.disabled = !(isAdmin || (isPrescriber && permissions.exportData));
         if (exportSettingsBtn) exportSettingsBtn.disabled = !isAdmin;
@@ -523,6 +971,9 @@ class NutriSoft {
     }
     initEventListeners() { 
         console.log("NutriSoft.initEventListeners: Setting up event listeners...");
+        document.getElementById('sidebar-toggle-btn')?.addEventListener('click', () => {
+            document.body.classList.toggle('sidebar-open');
+        });
 
         const userNameInput = document.getElementById('user-name');
         userNameInput?.addEventListener('change', (event) => {
@@ -534,11 +985,26 @@ class NutriSoft {
 
         document.getElementById('add-patient-btn')?.addEventListener('click', this.addPatient);
         document.getElementById('clear-patient-form-btn')?.addEventListener('click', this.clearPatientForm);
+        document.getElementById('toggle-patient-form-btn')?.addEventListener('click', () => {
+            document.getElementById('patient-form')?.classList.toggle('hidden');
+        });
         document.getElementById('patient-dob')?.addEventListener('change', (e) => this.updateAgeDisplay(e.target.value));
+        document.getElementById('prescription-patient')?.addEventListener('change', () => {
+            const msg = document.getElementById('calc-awaiting-message');
+            if (!msg) return;
+            const hasPatient = !!document.getElementById('prescription-patient')?.value;
+            msg.classList.toggle('hidden', hasPatient);
+        });
 
         document.getElementById('calculate-formulation-btn')?.addEventListener('click', this.calculateFormulation);
         document.getElementById('save-prescription-btn')?.addEventListener('click', this.savePrescription);
-        document.getElementById('print-prescription-btn')?.addEventListener('click', () => this.printPrescription(this.currentPrescriptionIndex)); 
+        document.getElementById('print-prescription-btn')?.addEventListener('click', () => this.printPrescription(this.currentPrescriptionIndex));
+        document.getElementById('preview-pdf-btn')?.addEventListener('click', () => this.previewPrescriptionPDF(this.currentPrescriptionIndex));
+        document.getElementById('print-labels-btn')?.addEventListener('click', () => this.printLabelsOnly(this.currentPrescriptionIndex));
+        document.getElementById('suggest-needs-btn')?.addEventListener('click', () => this.applySuggestedNeeds());
+        ['amino-acids-solution','glucose-solution','lipids-solution','nacl-solution','kcl-solution','cacl2-solution'].forEach(id => {
+            document.getElementById(id)?.addEventListener('change', () => this.renderLotSelectors());
+        });
 
         document.getElementById('save-settings-btn')?.addEventListener('click', this.saveSettings);
         ['auto-save-interval', 'enable-auto-save', 'enable-auto-export', 'access-level', 'perm-export', 'default-osmolarity-limit'].forEach(id => {
@@ -548,6 +1014,12 @@ class NutriSoft {
 
         document.getElementById('view-audit-logs-btn')?.addEventListener('click', () => { this.showAuditLogsModal(); this.renderAuditLogs(); });
         document.getElementById('close-audit-logs-modal-btn')?.addEventListener('click', () => { this.hideAuditLogsModal(); });
+        document.getElementById('close-print-preview-modal-btn')?.addEventListener('click', () => this.hidePrintPreviewModal());
+        document.getElementById('close-patient-history-modal-btn')?.addEventListener('click', () => this.hidePatientHistoryModal());
+        document.querySelectorAll('.history-tab-btn').forEach(btn => btn.addEventListener('click', () => this.setPatientHistoryTab(btn.dataset.tab)));
+        document.getElementById('preview-tab-map')?.addEventListener('click', () => this.setPreviewTab('map'));
+        document.getElementById('preview-tab-label')?.addEventListener('click', () => this.setPreviewTab('label'));
+        document.getElementById('print-preview-action-btn')?.addEventListener('click', () => this.printCurrentPreviewTab());
 
         document.querySelectorAll('.nav-btn[id$="-nav-btn"]').forEach(btn => {
             btn.addEventListener('click', (event) => {
@@ -569,14 +1041,25 @@ class NutriSoft {
 
         document.getElementById('prescription-history-table')?.addEventListener('click', this.handlePrescriptionAction);
         document.getElementById('reports-table')?.addEventListener('click', this.handleReportsAction);
+        document.getElementById('reports-table')?.addEventListener('change', (event) => this.handleReportsStatusChange(event));
         document.getElementById('solutions-list')?.addEventListener('click', this.handleSolutionsAction);
         document.getElementById('patients-list')?.addEventListener('click', this.handlePatientListAction.bind(this)); 
 
         document.getElementById('add-solution-btn')?.addEventListener('click', () => this.editSolution()); 
         document.getElementById('save-solution-btn')?.addEventListener('click', this.saveSolution);
+        document.getElementById('add-lot-btn')?.addEventListener('click', this.addLot);
+        document.getElementById('lots-list')?.addEventListener('click', this.handleLotAction);
+        document.getElementById('lots-search-input')?.addEventListener('input', () => this.renderLots());
+        document.getElementById('lots-filter-solution')?.addEventListener('change', () => this.renderLots());
+        document.getElementById('lots-filter-status')?.addEventListener('change', () => this.renderLots());
+
         document.getElementById('cancel-solution-btn')?.addEventListener('click', () => this.clearSolutionForm(true)); 
         document.getElementById('solution-type')?.addEventListener('change', (event) => {
             this.updateSolutionFormFieldsVisibility(event.target.value);
+        });
+
+        document.getElementById('prescription-protocol')?.addEventListener('change', (e) => {
+            this.applyProtocol(e.target.value);
         });
 
         const evolutionPatientSelect = document.getElementById('evolution-patient-select');
@@ -610,8 +1093,16 @@ class NutriSoft {
                     console.log("Prescription input changed, disabling save/print buttons.");
                     const saveBtn = document.getElementById('save-prescription-btn');
                     const printBtn = document.getElementById('print-prescription-btn');
+                    const previewBtn = document.getElementById('preview-pdf-btn');
+                    const labelsBtn = document.getElementById('print-labels-btn');
                     if (saveBtn) saveBtn.disabled = true;
                     if (printBtn) printBtn.disabled = true;
+                    if (previewBtn) previewBtn.disabled = true;
+                    if (labelsBtn) labelsBtn.disabled = true;
+                    if (event.isTrusted && event.target.dataset && event.target.dataset.suggested) {
+                        delete event.target.dataset.suggested;
+                        event.target.classList.remove('suggested-field');
+                    }
                 }
             });
         }
@@ -633,10 +1124,51 @@ class NutriSoft {
              this.editPatient(patientId);
              AuditLogger.log('initiateEditPatient', { patientId });
              document.getElementById('patient-name')?.focus();
+         } else if (action === 'history') {
+             this.showPatientHistoryModal(patientId);
          } else if (action === 'delete') {
              this.deletePatient(patientId);
          }
      }
+
+    showPatientHistoryModal(patientId) {
+        const patient = this.patients.find(p => p.id === patientId);
+        const modal = document.getElementById('patient-history-modal');
+        const title = document.getElementById('patient-history-title');
+        if (!modal || !patient) return;
+        if (title) title.textContent = `Histórico Nutricional — ${patient.name} (${patient.idNumber || patient.id})`;
+        this.currentHistoryPatientId = patientId;
+        modal.classList.remove('hidden');
+        document.body.classList.add('modal-open');
+        this.setPatientHistoryTab('overview');
+    }
+
+    hidePatientHistoryModal() {
+        const modal = document.getElementById('patient-history-modal');
+        if (!modal) return;
+        modal.classList.add('hidden');
+        document.body.classList.remove('modal-open');
+    }
+
+    setPatientHistoryTab(tab) {
+        const content = document.getElementById('patient-history-content');
+        if (!content) return;
+        document.querySelectorAll('.history-tab-btn').forEach(btn => btn.classList.toggle('active', btn.dataset.tab === tab));
+        const patientId = this.currentHistoryPatientId;
+        const items = (this.prescriptions || []).filter(p => p.patientId === patientId);
+        if (!items.length) {
+            content.innerHTML = '<div class="text-gray-500 p-4">Sem histórico</div>';
+            return;
+        }
+        if (tab === 'overview') {
+            content.innerHTML = `<ul class="list-disc pl-5 text-sm space-y-1">${items.slice(-10).map(p => `<li>${new Date(p.date || p.createdAt).toLocaleDateString()} · Vol ${this.formatValue(p.volume, 'mL', 0)} · ${this.formatValue(p.energy?.total, 'kcal', 0)}</li>`).join('')}</ul>`;
+        } else if (tab === 'macros') {
+            content.innerHTML = `<ul class="list-disc pl-5 text-sm space-y-1">${items.slice(-10).map(p => `<li>${new Date(p.date || p.createdAt).toLocaleDateString()} · Prot ${this.formatValue(p.formulation?.proteins?.required, 'g', 1)} · Gluc ${this.formatValue(p.formulation?.glucose?.required, 'g', 1)} · Lip ${this.formatValue(p.formulation?.lipids?.required, 'g', 1)}</li>`).join('')}</ul>`;
+        } else {
+            content.innerHTML = `<ul class="list-disc pl-5 text-sm space-y-1">${items.slice(-10).map(p => `<li>${new Date(p.date || p.createdAt).toLocaleDateString()} · Na ${this.formatValue(p.formulation?.electrolytes?.sodium?.displayRequired, 'mEq', 1)} · K ${this.formatValue(p.formulation?.electrolytes?.potassium?.required, 'mEq', 1)} · P ${this.formatValue(p.formulation?.electrolytes?.phosphorus?.required, 'mmol', 1)}</li>`).join('')}</ul>`;
+        }
+    }
+
     confirmExportData(dataType) { 
         if (confirm(`Deseja exportar ${dataType === 'all' ? 'todos os dados' : dataType === 'settings' ? 'as configurações' : 'os logs de auditoria'} para um ficheiro JSON?`)) {
             this.dataManager.exportData(dataType);
@@ -740,12 +1272,27 @@ class NutriSoft {
              case 'print':
                  this.printPrescription(originalIndex);
                  break;
+             case 'labels':
+                 this.printLabelsOnly(originalIndex);
+                 break;
              case 'delete':
                  this.deletePrescription(originalIndex); 
                  break;
              default: console.warn("Unknown report action:", action);
          }
      }
+
+    handleReportsStatusChange(event) {
+        const select = event.target.closest('select[data-action="update-status"]');
+        if (!select) return;
+        const prepNumber = parseInt(select.dataset.prepNumber);
+        const originalIndex = this.prescriptions.findIndex(p => p.preparationNumber === prepNumber);
+        if (originalIndex < 0) return;
+        this.prescriptions[originalIndex].productionStatus = select.value;
+        this.dataManager.savePrescriptions(this.prescriptions);
+        this.renderReports();
+    }
+
     handleDataImport(event) { 
         const file = event.target.files?.[0];
         if (!file) return;
@@ -838,12 +1385,15 @@ class NutriSoft {
     }
     renderUIAllSections() { 
         console.log("NutriSoft.renderUIAllSections: Rendering all dynamic UI content...");
-        this.renderPatients(); 
-        this.renderPatientsList(); 
+        this.renderPatients();
+        this.renderProtocolOptions();
+        this.renderPatientsList();
         this.renderPrescriptionHistory();
         this.renderReports();
         this.renderPerformanceStats();
         this.renderSolutions();
+        this.renderLots();
+        this.renderLotSelectors();
         this.renderEvolutionPatientSelect();
         console.log("NutriSoft.renderUIAllSections: All sections rendering process initiated.");
     }
@@ -908,6 +1458,7 @@ class NutriSoft {
             row.innerHTML = `
                 <td class="px-4 py-2 font-medium text-gray-900">${name}</td>
                 <td class="px-4 py-2">${details.type || 'N/A'}</td>
+                <td class="px-4 py-2 text-sm text-gray-600">${details.osmolarityContribution ? `${details.osmolarityContribution} mOsm/L` : 'N/A'}</td>
                 <td class="px-4 py-2 text-sm text-gray-600">${concentrationDetails}</td>
                 <td class="px-4 py-2 whitespace-nowrap text-right">
                     <button data-action="edit" data-name="${name}" class="table-action-btn text-blue-600 hover:text-blue-800 mr-2" title="Editar Solução"><i class="fas fa-edit"></i></button>
@@ -916,7 +1467,269 @@ class NutriSoft {
             `;
         });
         this.checkAccessPermissions(); 
+        this.renderLots();
+        this.renderLotSelectors();
     }
+
+    renderLots() {
+        const tbody = document.getElementById('lots-list');
+        const solutionSelect = document.getElementById('lot-solution-name');
+        const solutionFilter = document.getElementById('lots-filter-solution');
+        const statusFilter = document.getElementById('lots-filter-status');
+        const searchInput = document.getElementById('lots-search-input');
+        if (!tbody) return;
+
+        if (solutionSelect) {
+            const names = Object.keys(this.solutions).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+            solutionSelect.innerHTML = names.map(name => `<option value="${name}">${name}</option>`).join('');
+            if (solutionFilter) {
+                const currentValue = solutionFilter.value;
+                solutionFilter.innerHTML = `<option value="">Todas as soluções</option>` + names.map(name => `<option value="${name}">${name}</option>`).join('');
+                solutionFilter.value = names.includes(currentValue) ? currentValue : '';
+            }
+        }
+
+        const noResultsRowTemplate = tbody.querySelector('.no-results-row');
+        tbody.innerHTML = '';
+        if (noResultsRowTemplate) tbody.appendChild(noResultsRowTemplate.cloneNode(true));
+        const noResultsRow = tbody.querySelector('.no-results-row');
+
+        if (!this.lots.length) {
+            noResultsRow?.classList.remove('hidden');
+            return;
+        }
+        noResultsRow?.classList.add('hidden');
+
+        const q = (searchInput?.value || '').trim().toLowerCase();
+        const selectedSolution = solutionFilter?.value || '';
+        const selectedStatus = statusFilter?.value || '';
+        const filtered = this.lots.filter(lot => {
+            const computedStatus = this.computeLotStatus(lot);
+            if (selectedSolution && lot.solutionName !== selectedSolution) return false;
+            if (selectedStatus && computedStatus !== selectedStatus) return false;
+            if (!q) return true;
+            const haystack = [
+                lot.solutionName,
+                lot.lotNumber,
+                lot.manufacturer,
+                lot.notes,
+                lot.expiry
+            ].join(' ').toLowerCase();
+            return haystack.includes(q);
+        });
+
+        const sorted = [...filtered].sort((a, b) => (a.expiry || '').localeCompare(b.expiry || ''));
+        if (!sorted.length) {
+            noResultsRow?.classList.remove('hidden');
+            return;
+        }
+        sorted.forEach((lot) => {
+            const row = tbody.insertRow(tbody.rows.length - (noResultsRow ? 1 : 0));
+            const status = this.computeLotStatus(lot);
+            const nearExpiry = this.isLotNearExpiry(lot);
+            if (nearExpiry) row.classList.add('lot-row-warning');
+            row.innerHTML = `
+                <td class="px-3 py-2 text-sm">${lot.solutionName || '—'}</td>
+                <td class="px-3 py-2 text-sm font-semibold">${lot.lotNumber || '—'}</td>
+                <td class="px-3 py-2 text-sm">${lot.expiry || '—'}</td>
+                <td class="px-3 py-2 text-sm">${lot.openDate || '—'}</td>
+                <td class="px-3 py-2 text-sm">${lot.internalBudHours ? `${lot.internalBudHours} h` : '—'}</td>
+                <td class="px-3 py-2 text-sm ${status === 'expirado' || status === 'retirado' ? 'text-red-600 font-semibold' : ''}">${status}</td>
+                <td class="px-3 py-2 text-sm">${Number.isFinite(lot.stockMl) ? `${lot.stockMl} ml` : '—'}</td>
+                <td class="px-3 py-2 text-sm">${lot.manufacturer || '—'}</td>
+                <td class="px-3 py-2 text-sm">${lot.notes || '—'}</td>
+                <td class="px-3 py-2 text-right">
+                    <button type="button" class="btn-secondary btn-sm" data-action="toggle-lot-status" data-id="${lot.id}">${status === 'ativo' ? 'Retirar' : 'Ativar'}</button>
+                    <button type="button" class="btn-danger btn-sm" data-action="delete-lot" data-id="${lot.id}">Remover</button>
+                </td>`;
+        });
+    }
+
+    computeLotStatus(lot) {
+        const explicit = String(lot.status || '').toLowerCase();
+        if (explicit === 'retirado' || explicit === 'quarentena') return explicit;
+        if (lot.expiry && new Date(lot.expiry) < new Date(new Date().toDateString())) return 'expirado';
+        return explicit || 'ativo';
+    }
+
+    isLotNearExpiry(lot, days = 30) {
+        if (!lot?.expiry) return false;
+        const today = new Date(new Date().toDateString());
+        const expiry = new Date(lot.expiry);
+        if (Number.isNaN(expiry.getTime()) || expiry < today) return false;
+        const diffDays = Math.ceil((expiry - today) / (1000 * 60 * 60 * 24));
+        return diffDays <= days;
+    }
+
+    renderLotSelectors() {
+        const container = document.getElementById('lot-selection-grid');
+        if (!container) return;
+
+        const targets = [
+            { key: 'proteins', label: 'Aminoácidos', inputId: 'lot-proteins' },
+            { key: 'glucose', label: 'Glucose', inputId: 'lot-glucose' },
+            { key: 'lipids', label: 'Lípidos', inputId: 'lot-lipids' },
+            { key: 'sodium', label: 'Sódio', inputId: 'lot-sodium' },
+            { key: 'potassium', label: 'Potássio', inputId: 'lot-potassium' },
+            { key: 'calcium', label: 'Cálcio', inputId: 'lot-calcium' }
+        ];
+
+        container.innerHTML = targets.map(t => `
+            <div>
+                <label for="${t.inputId}" class="block text-xs font-medium text-gray-600">${t.label}</label>
+                <select id="${t.inputId}" class="input-field mt-1"></select>
+            </div>
+        `).join('');
+
+        targets.forEach(t => this.populateLotSelect(t.inputId, t.key));
+    }
+
+    populateLotSelect(selectId, targetKey) {
+        const select = document.getElementById(selectId);
+        if (!select) return;
+        const solution = this.resolveSolutionForLotTarget(targetKey);
+        const validLots = this.getLotsForSolution(solution);
+        select.innerHTML = `<option value="">(Sem lote)</option>` + validLots.map(lot => {
+            const near = this.isLotNearExpiry(lot, 30) ? ' ⚠' : '';
+            return `<option value="${lot.id}">${lot.lotNumber} · Val ${lot.expiry || '—'}${near}</option>`;
+        }).join('');
+    }
+
+    resolveSolutionForLotTarget(targetKey) {
+        const mapping = {
+            proteins: document.getElementById('amino-acids-solution')?.value,
+            glucose: document.getElementById('glucose-solution')?.value,
+            lipids: document.getElementById('lipids-solution')?.value,
+            sodium: document.getElementById('nacl-solution')?.value,
+            potassium: document.getElementById('kcl-solution')?.value,
+            calcium: document.getElementById('cacl2-solution')?.value
+        };
+        return mapping[targetKey] || null;
+    }
+
+    getLotsForSolution(solutionName) {
+        if (!solutionName) return [];
+        const active = this.lots.filter(l => l.solutionName === solutionName && this.computeLotStatus(l) === 'ativo');
+        return active.sort((a, b) => (a.expiry || '9999-99-99').localeCompare(b.expiry || '9999-99-99'));
+    }
+
+    collectSelectedLots(formulation) {
+        const mapping = {
+            proteins: 'lot-proteins',
+            glucose: 'lot-glucose',
+            lipids: 'lot-lipids',
+            sodium: 'lot-sodium',
+            potassium: 'lot-potassium',
+            calcium: 'lot-calcium'
+        };
+        const selected = {};
+        Object.entries(mapping).forEach(([key, inputId]) => {
+            const lotId = document.getElementById(inputId)?.value;
+            if (!lotId) return;
+            const lot = this.lots.find(l => l.id === lotId);
+            if (!lot) return;
+            selected[key] = { ...lot };
+        });
+
+        if (formulation?.preparationMeta) {
+            formulation.preparationMeta.componentLots = selected;
+        }
+
+        return selected;
+    }
+
+    validateSelectedLots(formulation) {
+        const selected = formulation?.preparationMeta?.componentLots || {};
+        const requiredKeys = ['proteins', 'glucose', 'lipids'];
+        requiredKeys.forEach((key) => {
+            if (!selected[key]) {
+                formulation.errors.push(`Lote obrigatório não selecionado para ${key}.`);
+            }
+        });
+        ['sodium', 'potassium', 'calcium'].forEach((key) => {
+            if (!selected[key]) formulation.warnings.push(`Lote não selecionado para ${key}. Recomenda-se rastreabilidade completa.`);
+        });
+
+        Object.values(selected).forEach((lot) => {
+            const status = this.computeLotStatus(lot);
+            if (status === 'retirado' || status === 'quarentena') {
+                formulation.errors.push(`Lote ${lot.lotNumber} está em estado '${status}' e não pode ser usado.`);
+            }
+            if (status === 'expirado') {
+                formulation.errors.push(`Lote expirado detetado (${lot.lotNumber}) — impressão bloqueada.`);
+            } else if (this.isLotNearExpiry(lot, 14)) {
+                formulation.warnings.push(`Lote ${lot.lotNumber} próximo da validade (${lot.expiry}).`);
+            }
+        });
+    }
+
+    addLot() {
+        const solutionName = document.getElementById('lot-solution-name')?.value;
+        const lotNumber = document.getElementById('lot-number')?.value?.trim();
+        const expiry = document.getElementById('lot-expiry')?.value;
+        const manufacturer = document.getElementById('lot-manufacturer')?.value?.trim() || '—';
+        const stockMl = parseNum(document.getElementById('lot-stock')?.value, 0);
+        const openDate = document.getElementById('lot-open-date')?.value || '';
+        const reconstitutionDate = document.getElementById('lot-reconstitution-date')?.value || '';
+        const internalBudHours = parseNum(document.getElementById('lot-internal-bud')?.value, 0);
+        const status = document.getElementById('lot-status')?.value || 'ativo';
+        const notes = document.getElementById('lot-notes')?.value?.trim() || '';
+
+        if (!solutionName || !lotNumber) {
+            this.dataManager.displayNotification('Indique solução e número de lote.', 'warning');
+            return;
+        }
+        if (expiry && new Date(expiry) < new Date(new Date().toDateString())) {
+            this.dataManager.displayNotification('Não é permitido adicionar lotes já expirados.', 'error');
+            return;
+        }
+
+        const newLot = {
+            id: `lot_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+            solutionName,
+            lotNumber,
+            expiry,
+            manufacturer,
+            stockMl,
+            openDate,
+            reconstitutionDate,
+            internalBudHours: internalBudHours > 0 ? internalBudHours : null,
+            status,
+            notes,
+            createdAt: new Date().toISOString()
+        };
+
+        this.lots.push(newLot);
+        this.dataManager.saveLots(this.lots);
+        AuditLogger.log('addLot', { lotId: newLot.id, solutionName, lotNumber, expiry });
+        this.renderLots();
+        this.renderLotSelectors();
+        this.dataManager.displayNotification('Lote adicionado com sucesso.', 'success');
+    }
+
+    handleLotAction(event) {
+        const btn = event.target.closest('button[data-action]');
+        if (!btn) return;
+        const lotId = btn.dataset.id;
+        if (btn.dataset.action === 'toggle-lot-status') {
+            this.lots = this.lots.map(lot => {
+                if (lot.id !== lotId) return lot;
+                const current = this.computeLotStatus(lot);
+                return { ...lot, status: current === 'ativo' ? 'retirado' : 'ativo' };
+            });
+            this.dataManager.saveLots(this.lots);
+            this.renderLots();
+            this.renderLotSelectors();
+            return;
+        }
+        if (btn.dataset.action !== 'delete-lot') return;
+        this.lots = this.lots.filter(lot => lot.id !== lotId);
+        this.dataManager.saveLots(this.lots);
+        AuditLogger.log('deleteLot', { lotId });
+        this.renderLots();
+        this.renderLotSelectors();
+    }
+
     renderPatients() { 
         const select = document.getElementById('prescription-patient');
         if (!select) {
@@ -989,20 +1802,62 @@ class NutriSoft {
         sortedPatients.forEach(patient => {
             const row = tbody.insertRow(tbody.rows.length - (noResultsRow ? 1 : 0));
             row.classList.add('hover:bg-gray-50');
-            row.insertCell().textContent = patient.idNumber || '-';
             row.insertCell().textContent = patient.name;
+            row.insertCell().textContent = patient.idNumber || '-';
             row.insertCell().textContent = patient.service || '-';
-            row.insertCell().textContent = `${patient.weight ?? '?'} kg`;
-            row.insertCell().textContent = patient.condition || '-';
+            row.insertCell().textContent = `${patient.weight ?? '?'} kg / ${patient.height ?? '?'} cm`;
+            const bmi = Number(patient.bmi) || ((patient.weight > 0 && patient.height > 0) ? (patient.weight / Math.pow(patient.height / 100, 2)) : null);
+            row.insertCell().innerHTML = bmi ? `${bmi.toFixed(1)} <span class="badge">NORMAL</span>` : '-';
+            row.insertCell().textContent = patient.condition || 'Estável';
 
             const actionsCell = row.insertCell();
             actionsCell.classList.add('whitespace-nowrap', 'p-3', 'text-right'); 
             actionsCell.innerHTML = `
+                <button data-action="history" data-id="${patient.id}" class="table-action-btn text-indigo-600 hover:text-indigo-800 mr-2 focus:outline-none focus:ring-2 focus:ring-indigo-500" title="Histórico"><i class="fas fa-history"></i></button>
                 <button data-action="edit" data-id="${patient.id}" class="table-action-btn text-blue-600 hover:text-blue-800 mr-2 focus:outline-none focus:ring-2 focus:ring-blue-500" title="Editar Doente"><i class="fas fa-edit"></i></button>
                 <button data-action="delete" data-id="${patient.id}" class="table-action-btn text-red-600 hover:text-red-800 focus:outline-none focus:ring-2 focus:ring-red-500" title="Eliminar Doente"><i class="fas fa-trash"></i></button>
             `;
         });
-        this.checkAccessPermissions(); 
+        this.checkAccessPermissions();
+    }
+
+    renderProtocolOptions() {
+        const select = document.getElementById('prescription-protocol');
+        if (!select) {
+            console.warn("renderProtocolOptions: select not found.");
+            return;
+        }
+        const currentVal = select.value;
+        select.innerHTML = '<option value="">Nenhum</option>';
+        (this.settings.protocols || []).forEach(proto => {
+            const opt = document.createElement('option');
+            opt.value = proto.id;
+            opt.textContent = proto.name;
+            if (proto.id === currentVal) opt.selected = true;
+            select.appendChild(opt);
+        });
+    }
+
+    applyProtocol(protocolId) {
+        if (!protocolId) return;
+        const protocol = (this.settings.protocols || []).find(p => p.id === protocolId);
+        if (!protocol) return;
+        const template = protocol.dailyTemplates?.[0];
+        if (!template?.inputs) return;
+        const patient = this.getSelectedPatient();
+        const weight = patient?.weight || 0;
+        const inputs = template.inputs;
+        if (inputs.nitrogen) this.setInputValue('nitrogen-admin', inputs.nitrogen);
+        if (inputs.glucose) this.setInputValue('glucose-admin', inputs.glucose);
+        if (inputs.lipids) this.setInputValue('lipid-admin', inputs.lipids);
+        if (weight > 0) {
+            if (inputs.sodium) this.setInputValue('sodium-needs', (inputs.sodium / weight).toFixed(2));
+            if (inputs.potassium) this.setInputValue('potassium-needs', (inputs.potassium / weight).toFixed(2));
+            if (inputs.magnesium) this.setInputValue('magnesium-needs', (inputs.magnesium / weight).toFixed(2));
+            if (inputs.calcium) this.setInputValue('calcium-needs', (inputs.calcium / weight).toFixed(2));
+        }
+        if (inputs.phosphorus) this.setInputValue('phosphorus-needs', inputs.phosphorus);
+        if (inputs.traceElements) this.setInputValue('oligoelements-volume', inputs.traceElements);
     }
     renderPatientEvolution(patientId) { 
          const tbody = document.getElementById('patient-evolution-history');
@@ -1117,6 +1972,7 @@ class NutriSoft {
         } else if (section === 'prescription') {
             fieldsToValidate.push({ id: 'prescription-patient', required: true, message: 'Selecione o doente.' });
             fieldsToValidate.push({ id: 'total-volume', required: true, type: 'number', min: 1, message: 'Volume total deve ser um número válido maior que zero.' });
+            fieldsToValidate.push({ id: 'infusion-hours', required: true, type: 'number', min: 1, message: 'Horas de perfusão devem ser um número válido maior que zero.' });
             fieldsToValidate.push({ id: 'protein-needs', required: true, type: 'number', min: 0, message: 'Necessidades proteicas devem ser >= 0.' });
             fieldsToValidate.push({ id: 'lipid-needs', required: true, type: 'number', min: 0, message: 'Necessidades lipídicas devem ser >= 0.' });
             fieldsToValidate.push({ id: 'glucose-rate', required: true, type: 'number', min: 0, message: 'Taxa de glucose deve ser >= 0.' });
@@ -1153,11 +2009,11 @@ class NutriSoft {
 
             if (field.required && (value === null || value.trim() === '')) {
                 fieldIsValid = false;
-            } else if (value.trim() !== '' && field.type === 'number') { 
-                const numValue = parseFloat(value);
-                if (isNaN(numValue)) {
+            } else if (value.trim() !== '' && field.type === 'number') {
+                if (!isValidNumericInput(value)) {
                     fieldIsValid = false; currentMessage = `${inputField.labels?.[0]?.textContent || 'Campo'} deve ser um número.`;
                 } else {
+                    const numValue = parseNum(value);
                     if (field.min !== undefined && numValue < field.min) {
                         fieldIsValid = false; currentMessage = `${inputField.labels?.[0]?.textContent || 'Campo'} deve ser no mínimo ${field.min}.`;
                     }
@@ -1201,11 +2057,11 @@ class NutriSoft {
             errorElement.classList.add('hidden');
         }
     }
-    calculateAge(dob) { 
+    calculateAge(dob) {
         if (!dob) return '';
         try {
             const birthDate = new Date(dob);
-            if (isNaN(birthDate.getTime())) return ''; 
+            if (isNaN(birthDate.getTime())) return '';
             const today = new Date();
 
             let years = today.getFullYear() - birthDate.getFullYear();
@@ -1234,7 +2090,72 @@ class NutriSoft {
         const ageDisplay = document.getElementById('patient-age-display');
         if (ageDisplay) {
             ageDisplay.textContent = this.calculateAge(dobValue);
-        } 
+        }
+    }
+    getPatientAgeInYears(patient) {
+        if (!patient) return null;
+        if (typeof patient.age === 'number' && Number.isFinite(patient.age)) {
+            return patient.age;
+        }
+        const dob = patient.dob || patient.birthDate;
+        if (!dob) return null;
+        const birthDate = new Date(dob);
+        if (isNaN(birthDate.getTime())) return null;
+        const diffMs = Date.now() - birthDate.getTime();
+        if (diffMs < 0) return 0;
+        return diffMs / (1000 * 60 * 60 * 24 * 365.25);
+    }
+    determineGuidelineProfile(patient) {
+        if (!patient) return DEFAULT_GUIDELINE_ID;
+        if (patient.condition && GUIDELINE_TABLES[patient.condition]) {
+            return patient.condition;
+        }
+        const ageYears = this.getPatientAgeInYears(patient);
+        if (ageYears !== null) {
+            if (ageYears < 1) return 'neonate';
+            if (ageYears < 18) return 'pediatric';
+        }
+        return DEFAULT_GUIDELINE_ID;
+    }
+    applySuggestedNeeds() {
+        const patient = this.getSelectedPatient();
+        if (!patient) {
+            this.dataManager.displayNotification('Selecione um doente para gerar sugestões.', 'warning');
+            return;
+        }
+
+        const profileId = this.determineGuidelineProfile(patient);
+        const profile = GUIDELINE_TABLES[profileId] || GUIDELINE_TABLES[DEFAULT_GUIDELINE_ID];
+        const weight = Number(patient.weight) || 0;
+
+        const setSuggested = (id, value, decimals = 2) => {
+            if (!Number.isFinite(value) || value <= 0) return;
+            const field = document.getElementById(id);
+            if (!field) return;
+            field.value = value.toFixed(decimals);
+            field.dataset.suggested = 'true';
+            field.classList.add('suggested-field');
+            const evt = new Event('input', { bubbles: true });
+            field.dispatchEvent(evt);
+        };
+
+        setSuggested('protein-needs', midpoint(profile.protein_g_per_kg || []));
+        setSuggested('lipid-needs', midpoint(profile.lipid_g_per_kg || []));
+        setSuggested('glucose-rate', midpoint(profile.glucose_mg_kg_min || []));
+        setSuggested('sodium-needs', midpoint(profile.sodium_mEq_per_kg || []));
+        setSuggested('potassium-needs', midpoint(profile.potassium_mEq_per_kg || []));
+        setSuggested('magnesium-needs', midpoint(profile.magnesium_mEq_per_kg || []));
+        setSuggested('calcium-needs', midpoint(profile.calcium_mEq_per_kg || []));
+
+        if (weight > 0) {
+            const phosphorusPerKg = midpoint(profile.phosphorus_mmol_per_kg || []);
+            if (phosphorusPerKg > 0) {
+                setSuggested('phosphorus-needs', phosphorusPerKg * weight, 0);
+            }
+        }
+
+        this.dataManager.displayNotification(`Sugestões aplicadas (${profile.label || profileId}). Confirme e ajuste conforme necessário.`, 'info');
+        AuditLogger.log('applySuggestedNeeds', { patientId: patient.id, profileId });
     }
     addPatient() { 
         console.log("NutriSoft.addPatient: Attempting to add/edit patient.");
@@ -1254,8 +2175,8 @@ class NutriSoft {
                 name: document.getElementById('patient-name').value.trim(), 
                 service: document.getElementById('patient-service')?.value.trim() || null,
                 dob: document.getElementById('patient-dob')?.value || null,
-                weight: parseFloat(document.getElementById('patient-weight').value), 
-                height: parseInt(document.getElementById('patient-height').value),   
+                weight: parseNum(document.getElementById('patient-weight').value, 0),
+                height: Math.round(parseNum(document.getElementById('patient-height').value, 0)),
                 condition: document.getElementById('patient-condition').value, 
                 createdAt: isEditing ? (this.patients.find(p => p.id === editingId)?.createdAt || new Date().toISOString()) : new Date().toISOString(),
                 updatedAt: new Date().toISOString()
@@ -1388,61 +2309,76 @@ class NutriSoft {
         if (patientIdInput) this.hideErrorMessage(patientIdInput); 
         return patient;
     }
-    getNumericInput(id, defaultValue = 0, isRequired = false) { 
-        // Note: Uses parseFloat, which expects '.' as decimal separator.
-        // Locale-specific input (e.g., using ',') may require pre-processing or a different parsing strategy.
+    getNumericInput(id, defaultValue = 0, isRequired = false) {
         const inputElement = document.getElementById(id);
         if (!inputElement) {
             return defaultValue;
         }
-        const value = inputElement.value;
-        if (value === null || value.trim() === '') {
-            return isRequired ? NaN : defaultValue; 
+        const rawValue = inputElement.value;
+        if (rawValue === null || rawValue.trim() === '') {
+            return isRequired ? NaN : defaultValue;
         }
-        const number = parseFloat(value);
-        return !isNaN(number) ? number : (isRequired ? NaN : defaultValue); 
+        if (!isValidNumericInput(rawValue)) {
+            return isRequired ? NaN : defaultValue;
+        }
+        return parseNum(rawValue, defaultValue);
     }
 
     calculateProteins(patient) {
         const defaults = { required: 0, solution: '', volume: 0, nitrogen: 0, error: null };
         if (!patient?.weight) return { ...defaults, error: "Peso do doente não disponível." };
 
-        // Obter a dose de proteína por kg (ex: 1.2 g/kg/dia)
+        const weight = patient.weight;
         const proteinNeedsPerKg = this.getNumericInput('protein-needs', 0, true);
-        if (isNaN(proteinNeedsPerKg)) return { ...defaults, error: "Necessidades proteicas inválidas." };
-
-        const nitrogenAdmin = this.getNumericInput('nitrogen-admin', 0, true);
-        const recommendedProtein = proteinNeedsPerKg * patient.weight;
-        let proteinRequired = recommendedProtein;
-        let nitrogenProvided = recommendedProtein / 6.25;
-        if (!isNaN(nitrogenAdmin) && nitrogenAdmin > 0) {
-            nitrogenProvided = nitrogenAdmin;
-            proteinRequired = nitrogenAdmin * 6.25;
+        if (isNaN(proteinNeedsPerKg)) {
+            return { ...defaults, error: "Necessidades proteicas inválidas." };
         }
 
-        // Obter solução selecionada (ex: AMINOVEN 10%)
+        const recommendedProtein_g_day = proteinNeedsPerKg * weight;
+        const recommendedNitrogen_g_day = recommendedProtein_g_day / 6.25;
+
+        const nitrogenAdmin = this.getNumericInput('nitrogen-admin', 0, false);
+        const hasDirectNitrogen = !isNaN(nitrogenAdmin) && nitrogenAdmin > 0;
+        const nitrogenTarget_g_day = hasDirectNitrogen ? nitrogenAdmin : recommendedNitrogen_g_day;
+
         const aminoacidSolutionName = document.getElementById('amino-acids-solution')?.value;
         const aminoacidSolution = aminoacidSolutionName ? this.solutions[aminoacidSolutionName] : null;
 
-        if (!aminoacidSolution || typeof aminoacidSolution.protein_concentration !== 'number') {
-            const errorMsg = `Solução de aminoácidos '${aminoacidSolutionName || 'Nenhuma'}' inválida ou sem concentração proteica definida.`;
-            return { ...defaults, required: proteinRequired, solution: aminoacidSolutionName, error: errorMsg };
+        if (!aminoacidSolution || typeof aminoacidSolution.nitrogen_concentration !== 'number') {
+            const errorMsg = `Solução de aminoácidos '${aminoacidSolutionName || 'Nenhuma'}' inválida ou sem concentração de azoto definida.`;
+            return {
+                ...defaults,
+                solution: aminoacidSolutionName || '',
+                nitrogen: nitrogenTarget_g_day,
+                required: hasDirectNitrogen ? nitrogenTarget_g_day * 6.25 : recommendedProtein_g_day,
+                recommended: recommendedProtein_g_day,
+                error: errorMsg
+            };
         }
 
-        // Calcular volume necessário (mL) → dose_total / concentração (g/L → g/mL)
-        // protein_concentration is in g/L in this.solutions
-        const concentration_g_ml = aminoacidSolution.protein_concentration / 1000;
-        const aminoacidVolume = concentration_g_ml > 0 ? proteinRequired / concentration_g_ml : 0;
+        const nitrogenPerMl = aminoacidSolution.nitrogen_concentration / 1000;
+        const rawVolume = nitrogenPerMl > 0 ? nitrogenTarget_g_day / nitrogenPerMl : 0;
+        const roundedVolume = roundVolume(rawVolume);
+        const nitrogenDelivered = nitrogenPerMl * roundedVolume;
 
-        // Calcular nitrogénio fornecido (se aplicável)
-        // nitrogen_concentration is in g/L in this.solutions
-        const nitrogen_g_ml = (aminoacidSolution.nitrogen_concentration ?? 0) / 1000;
-        const nitrogenFromVolume = nitrogen_g_ml * aminoacidVolume;
-        if (isNaN(nitrogenAdmin) || nitrogenAdmin <= 0) {
-            nitrogenProvided = nitrogenFromVolume;
+        let proteinDelivered = 0;
+        if (typeof aminoacidSolution.protein_concentration === 'number') {
+            proteinDelivered = (aminoacidSolution.protein_concentration / 1000) * roundedVolume;
+        } else {
+            proteinDelivered = nitrogenDelivered * 6.25;
         }
 
-        return { required: proteinRequired, recommended: recommendedProtein, solution: aminoacidSolutionName, volume: aminoacidVolume, nitrogen: nitrogenProvided, error: null };
+        return {
+            required: proteinDelivered,
+            recommended: recommendedProtein_g_day,
+            solution: aminoacidSolutionName || '',
+            volume: roundedVolume,
+            nitrogen: nitrogenDelivered,
+            nitrogenTarget: nitrogenTarget_g_day,
+            perKgTarget: proteinNeedsPerKg,
+            source: hasDirectNitrogen ? 'direct' : 'perKg',
+            error: null
+        };
     }
 
     calculateGlutamine(patient, proteinData) { 
@@ -1464,81 +2400,104 @@ class NutriSoft {
         // nitrogen_concentration is in g/L in this.solutions
         const glutamine_N_g_ml = glutamineSolution.nitrogen_concentration / 1000; 
         const glutamineVolume = glutamine_N_g_ml > 0 ? targetGlutamineNitrogenContribution / glutamine_N_g_ml : 0;
+        const roundedGlutamineVolume = roundVolume(glutamineVolume);
 
         // glutamine_concentration is in mg/mL in this.solutions
-        const glutamineProvided_g = (glutamineSolution.glutamine_concentration / 1000) * glutamineVolume; 
+        const glutamineProvided_g = (glutamineSolution.glutamine_concentration / 1000) * roundedGlutamineVolume;
 
         return {
-            required_g_dipeptide: glutamineProvided_g, 
+            required_g_dipeptide: glutamineProvided_g,
             solution: glutamineSolutionName,
-            volume: glutamineVolume,
-            nitrogen: targetGlutamineNitrogenContribution, 
+            volume: roundedGlutamineVolume,
+            nitrogen: targetGlutamineNitrogenContribution,
             error: null
         };
     }
 
-    calculateGlucose(patient) {
+    calculateGlucose(patient, infusionHours = 24) {
         const defaults = { required: 0, solution: '', volume: 0, error: null };
         if (!patient?.weight) return { ...defaults, error: "Peso do doente não disponível." };
 
-        // Obter taxa de glucose (mg/kg/min)
+        const weight = patient.weight;
         const glucoseRate_mg_kg_min = this.getNumericInput('glucose-rate', 0, true);
         if (isNaN(glucoseRate_mg_kg_min)) return { ...defaults, error: "Taxa de infusão de glucose inválida." };
 
-        const glucoseAdmin = this.getNumericInput('glucose-admin', 0, true);
-        const recommendedGlucose = (glucoseRate_mg_kg_min * patient.weight * 1440) / 1000;
-        let glucoseRequired_g_day = recommendedGlucose;
-        if (!isNaN(glucoseAdmin) && glucoseAdmin > 0) {
-            glucoseRequired_g_day = glucoseAdmin;
-        }
+        const infusionMinutes = Math.max(1, parseNum(infusionHours, 24) * 60);
+        const recommendedGlucose = (glucoseRate_mg_kg_min * weight * infusionMinutes) / 1000;
 
-        // Obter solução selecionada (ex: GLUCOSE 50%)
+        const glucoseAdmin = this.getNumericInput('glucose-admin', 0, false);
+        const hasDirectGlucose = !isNaN(glucoseAdmin) && glucoseAdmin > 0;
+        const glucoseRequired_g_day = hasDirectGlucose ? glucoseAdmin : recommendedGlucose;
+
         const glucoseSolutionName = document.getElementById('glucose-solution')?.value;
         const glucoseSolution = glucoseSolutionName ? this.solutions[glucoseSolutionName] : null;
 
         if (!glucoseSolution || typeof glucoseSolution.glucose_concentration !== 'number') {
             const errorMsg = `Solução de glucose '${glucoseSolutionName || 'Nenhuma'}' inválida ou sem concentração definida.`;
-            return { ...defaults, required: glucoseRequired_g_day, solution: glucoseSolutionName, error: errorMsg };
+            return {
+                ...defaults,
+                required: glucoseRequired_g_day,
+                recommended: recommendedGlucose,
+                solution: glucoseSolutionName || '',
+                error: errorMsg
+            };
         }
 
-        // Calcular volume necessário (mL) → dose_total / concentração (g/L → g/mL)
-        // glucose_concentration is in g/L in this.solutions
-        const concentration_g_ml = glucoseSolution.glucose_concentration / 1000; 
+        const concentration_g_ml = glucoseSolution.glucose_concentration / 1000;
         const glucoseVolume = concentration_g_ml > 0 ? glucoseRequired_g_day / concentration_g_ml : 0;
+        const roundedGlucoseVolume = roundVolume(glucoseVolume);
 
-        return { required: glucoseRequired_g_day, recommended: recommendedGlucose, solution: glucoseSolutionName, volume: glucoseVolume, error: null };
+        return {
+            required: glucoseRequired_g_day,
+            recommended: recommendedGlucose,
+            solution: glucoseSolutionName || '',
+            volume: roundedGlucoseVolume,
+            source: hasDirectGlucose ? 'direct' : 'rate',
+            rate_mg_kg_min: glucoseRate_mg_kg_min,
+            error: null
+        };
     }
 
     calculateLipids(patient) {
         const defaults = { required: 0, solution: '', volume: 0, error: null };
         if (!patient?.weight) return { ...defaults, error: "Peso do doente não disponível." };
 
-        // Obter a dose de lípidos por kg (ex: 1.0 g/kg/dia)
+        const weight = patient.weight;
         const lipidNeedsPerKg = this.getNumericInput('lipid-needs', 0, true);
         if (isNaN(lipidNeedsPerKg)) return { ...defaults, error: "Necessidades lipídicas inválidas." };
 
-        const lipidAdmin = this.getNumericInput('lipid-admin', 0, true);
-        const recommendedLipids = lipidNeedsPerKg * patient.weight;
-        let lipidRequired_g = recommendedLipids;
-        if (!isNaN(lipidAdmin) && lipidAdmin > 0) {
-            lipidRequired_g = lipidAdmin;
-        }
+        const recommendedLipids = lipidNeedsPerKg * weight;
+        const lipidAdmin = this.getNumericInput('lipid-admin', 0, false);
+        const hasDirectLipids = !isNaN(lipidAdmin) && lipidAdmin > 0;
+        const lipidRequired_g = hasDirectLipids ? lipidAdmin : recommendedLipids;
 
-        // Obter solução selecionada (ex: SMOFLIPID 200mg/ml)
         const lipidSolutionName = document.getElementById('lipids-solution')?.value;
         const lipidSolution = lipidSolutionName ? this.solutions[lipidSolutionName] : null;
 
         if (!lipidSolution || typeof lipidSolution.lipid_concentration !== 'number') {
             const errorMsg = `Solução lipídica '${lipidSolutionName || 'Nenhuma'}' inválida ou sem concentração definida.`;
-            return { ...defaults, required: lipidRequired_g, solution: lipidSolutionName, error: errorMsg };
+            return {
+                ...defaults,
+                required: lipidRequired_g,
+                recommended: recommendedLipids,
+                solution: lipidSolutionName || '',
+                error: errorMsg
+            };
         }
 
-        // Converter concentração para g/mL (ex: 200 mg/mL = 0.2 g/mL)
-        // lipid_concentration is in mg/mL in this.solutions
-        const concentration_g_ml = lipidSolution.lipid_concentration / 1000; 
+        const concentration_g_ml = lipidSolution.lipid_concentration / 1000;
         const lipidVolume = concentration_g_ml > 0 ? lipidRequired_g / concentration_g_ml : 0;
+        const roundedLipidVolume = roundVolume(lipidVolume);
 
-        return { required: lipidRequired_g, recommended: recommendedLipids, solution: lipidSolutionName, volume: lipidVolume, error: null };
+        return {
+            required: lipidRequired_g,
+            recommended: recommendedLipids,
+            solution: lipidSolutionName || '',
+            volume: roundedLipidVolume,
+            perKgTarget: lipidNeedsPerKg,
+            source: hasDirectLipids ? 'direct' : 'perKg',
+            error: null
+        };
     }
 
     calculateElectrolytes(patient) {
@@ -1591,10 +2550,11 @@ class NutriSoft {
                 }
             }
 
+            const safeVolume = (isNaN(volume) || !isFinite(volume)) ? 0 : roundVolume(volume);
             electrolytes[config.key] = {
                 required: requiredAmount,
                 solution: solutionName || '',
-                volume: (isNaN(volume) || !isFinite(volume)) ? 0 : volume,
+                volume: safeVolume,
                 error: error
             };
         });
@@ -1604,14 +2564,17 @@ class NutriSoft {
             const phosSol = this.solutions['GLICEROFOSFATO SÓDIO'];
             const extraNa = phos.volume * (phosSol.sodium_concentration / 1000);
             electrolytes['sodium'] = electrolytes['sodium'] || { required: 0, solution: document.getElementById('nacl-solution')?.value || '', volume: 0, error: null };
-            electrolytes['sodium'].required += extraNa;
             electrolytes['sodium'].fromPhosphorus = (electrolytes['sodium'].fromPhosphorus || 0) + extraNa;
+            electrolytes['sodium'].required = Math.max(0, (electrolytes['sodium'].required || 0) - extraNa);
+        }
+        if (electrolytes['sodium']) {
+            electrolytes['sodium'].displayRequired = (electrolytes['sodium'].required || 0) + (electrolytes['sodium'].fromPhosphorus || 0);
         }
 
         return electrolytes;
     }
 
-    calculateAdditives(patient, formulationData, totalVolumePrescribed) { 
+    calculateAdditives(patient, formulationData, totalVolumePrescribed) {
         const additives = {};
         const patientWeight = patient?.weight ?? 0;
         const glucoseRequired_g = formulationData?.glucose?.required ?? 0;
@@ -1680,14 +2643,65 @@ class NutriSoft {
                 }
             }
 
+            const safeVolume = (isNaN(volume) || !isFinite(volume)) ? 0 : roundVolume(volume);
             additives[config.key] = {
                 required: requiredAmount,
                 solution: solutionName || '',
-                volume: (isNaN(volume) || !isFinite(volume)) ? 0 : volume,
+                volume: safeVolume,
                 error: error
             };
         });
         return additives;
+    }
+
+    calculateEnergySummary(formulation) {
+        const weight = Number(formulation.patient?.weight) || 0;
+        const proteins_g = formulation.proteins?.required ?? 0;
+        const glucose_g = formulation.glucose?.required ?? 0;
+        const lipids_g = formulation.lipids?.required ?? 0;
+        const infusionHours = Number(formulation.infusionHours) || 24;
+        const infusionMinutes = Math.max(1, infusionHours * 60);
+
+        const energyProteins = proteins_g * 4;
+        const energyGlucose = glucose_g * 3.4;
+        const energyLipids = lipids_g * 9;
+        const totalEnergy = energyProteins + energyGlucose + energyLipids;
+
+        const proteinPerKg = weight > 0 ? proteins_g / weight : 0;
+        const glucosePerKg = weight > 0 ? glucose_g / weight : 0;
+        const lipidsPerKg = weight > 0 ? lipids_g / weight : 0;
+        const totalEnergyPerKg = weight > 0 ? totalEnergy / weight : 0;
+        const GIR = weight > 0 ? (glucose_g * 1000) / (weight * infusionMinutes) : 0;
+        const glucosePercent = formulation.volume > 0 ? (glucose_g / (formulation.volume / 100)) : 0;
+
+        return {
+            proteins: energyProteins,
+            glucose: energyGlucose,
+            lipids: energyLipids,
+            total: totalEnergy,
+            perKg: totalEnergyPerKg,
+            proteinPerKg,
+            glucosePerKg,
+            lipidsPerKg,
+            GIR,
+            glucosePercent
+        };
+    }
+
+    verifyComponentTotals(formulation, tolerance = 1) {
+        const collectVolume = (value) => roundVolume(value ?? 0, 1);
+        let total = collectVolume(formulation.proteins?.volume) +
+                    collectVolume(formulation.glutamine?.volume) +
+                    collectVolume(formulation.glucose?.volume) +
+                    collectVolume(formulation.lipids?.volume) +
+                    collectVolume(formulation.water?.volume);
+        Object.values(formulation.electrolytes || {}).forEach(el => total += collectVolume(el?.volume));
+        Object.values(formulation.additives || {}).forEach(ad => total += collectVolume(ad?.volume));
+        const diff = Math.abs(total - collectVolume(formulation.volume));
+        if (diff > tolerance) {
+            formulation.warnings.push(`Soma dos volumes (${total.toFixed(1)} mL) difere do volume total (${(formulation.volume || 0).toFixed(1)} mL) em ${diff.toFixed(1)} mL.`);
+        }
+        return diff;
     }
     getDefaultAdditiveSolution(additiveTypeKey, patient) { 
         const weight = patient?.weight ?? 0;
@@ -1726,8 +2740,9 @@ class NutriSoft {
         }
         return "Verificar visualmente a mistura final. Consultar literatura para interações não cobertas.";
     }
-    calculateOsmolarity(formulation) { 
+    calculateOsmolarity(formulation) {
         let totalOsmols = 0;
+        let estimatedFallbackUsed = false;
         const totalVolumeL = (formulation.volume ?? 0) / 1000;
 
         if (totalVolumeL <= 0) return 0;
@@ -1741,21 +2756,85 @@ class NutriSoft {
             if (volumeML > 0 && solution && typeof solution.osmolarityContribution === 'number') {
                 return (volumeML / 1000) * solution.osmolarityContribution;
             }
+
+            // Conservative fallback using concentration when explicit osmolarity is missing
+            if (volumeML > 0 && solution && solution.type === 'electrolyte') {
+                const sodium = solution.sodium_concentration || 0;
+                const potassium = solution.potassium_concentration || 0;
+                const calcium = solution.calcium_concentration || 0;
+                const magnesium = solution.magnesium_concentration || 0;
+                const phosphate = solution.phosphorus_concentration || 0;
+                const mEqTotal = sodium + potassium + calcium + magnesium + (phosphate * 2); // phosphate as divalent approx
+                if (mEqTotal > 0) {
+                    estimatedFallbackUsed = true;
+                    const perL = mEqTotal * 2; // ~2 mOsm por mEq de sal forte
+                    return (volumeML / 1000) * perL;
+                }
+            }
             return 0;
         };
 
         totalOsmols += calculateComponentOsmols(formulation.proteins);
-        totalOsmols += calculateComponentOsmols(formulation.glutamine); 
+        totalOsmols += calculateComponentOsmols(formulation.glutamine);
         totalOsmols += calculateComponentOsmols(formulation.glucose);
         totalOsmols += calculateComponentOsmols(formulation.lipids);
-        totalOsmols += calculateComponentOsmols(formulation.water); 
+        totalOsmols += calculateComponentOsmols(formulation.water);
 
         Object.values(formulation.electrolytes ?? {}).forEach(el_comp => totalOsmols += calculateComponentOsmols(el_comp));
         Object.values(formulation.additives ?? {}).forEach(ad_comp => totalOsmols += calculateComponentOsmols(ad_comp));
 
         const finalOsmolarity = totalOsmols / totalVolumeL;
+        if (estimatedFallbackUsed) {
+            formulation.warnings = formulation.warnings || [];
+            formulation.warnings.push('Osmolaridade estimada para alguns eletrólitos sem dado de rótulo — validar ficha técnica.');
+        }
         return isNaN(finalOsmolarity) || !isFinite(finalOsmolarity) ? 0 : finalOsmolarity;
     }
+
+    calculateCaPhosProfile(formulation) {
+        const totalVolumePrescription = parseNum(formulation?.volume, 0);
+        const validation = this.settings?.clinicalValidation || {};
+        const caPhosLimits = validation.caPhos || { warning: 30, hard: 45 };
+
+        const ca = formulation?.electrolytes?.calcium;
+        const phos = formulation?.electrolytes?.phosphorus;
+        const caSol = ca?.solution ? this.solutions[ca.solution] : null;
+        const phosSol = phos?.solution ? this.solutions[phos.solution] : null;
+
+        let calciumConc = 0;
+        if (ca?.volume > 0 && caSol?.calcium_concentration && totalVolumePrescription > 0) {
+            calciumConc = (ca.volume * (caSol.calcium_concentration / 1000)) / (totalVolumePrescription / 1000);
+        }
+
+        let phosphorusConc = 0;
+        if (phos?.volume > 0 && phosSol?.phosphorus_concentration && totalVolumePrescription > 0) {
+            phosphorusConc = (phos.volume * (phosSol.phosphorus_concentration / 1000)) / (totalVolumePrescription / 1000);
+        }
+
+        const sum = calciumConc + phosphorusConc;
+        const hasData = calciumConc > 0 && phosphorusConc > 0;
+        let risk = 'low';
+        if (hasData && sum > caPhosLimits.hard) risk = 'high';
+        else if (hasData && sum > caPhosLimits.warning) risk = 'moderate';
+
+        return {
+            calciumConc,
+            phosphorusConc,
+            sum,
+            limits: caPhosLimits,
+            hasData,
+            risk
+        };
+    }
+
+    normalizeFormulationRoutes(formulation) {
+        if (!formulation) return formulation;
+        const normalized = normalizeAdministrationRoute(formulation.route || formulation.administrationRoute);
+        formulation.route = normalized;
+        formulation.administrationRoute = normalized;
+        return formulation;
+    }
+
     validateFormulationAdvanced(formulation, errors = [], warnings = []) { 
         const patient = formulation.patient;
         const totalVolumePrescription = formulation.volume || 0;
@@ -1765,44 +2844,36 @@ class NutriSoft {
              return; 
         }
         const weight = patient.weight;
+        const validation = this.settings?.clinicalValidation || {};
+        const proteinLimits = validation.protein || { warning: 2.5, highWarning: 4.0 };
+        const lipidLimits = validation.lipid || { warning: 2.5, highWarning: 4.0 };
+        const girLimits = validation.gir || { warning: 7, highWarning: 14 };
+        const caPhosLimits = validation.caPhos || { warning: 30, hard: 45 };
+        const peripheralOsmAlertRatio = parseNum(validation.peripheralOsmAlertRatio, 0.9);
         if (weight <= 0) {
             errors.push("Peso do doente inválido para validação avançada de doses.");
             return;
         }
 
         const protein_g_kg = (formulation.proteins?.required ?? 0) / weight;
-        if (protein_g_kg > 4.0) warnings.push(`Dose de Proteínas (${protein_g_kg.toFixed(1)} g/kg) muito elevada. Verificar indicação.`);
-        else if (protein_g_kg > 2.5) warnings.push(`Dose de Proteínas (${protein_g_kg.toFixed(1)} g/kg) elevada. Considerar ajuste.`);
+        if (protein_g_kg > proteinLimits.highWarning) warnings.push(`Dose de Proteínas (${protein_g_kg.toFixed(1)} g/kg) muito elevada. Verificar indicação.`);
+        else if (protein_g_kg > proteinLimits.warning) warnings.push(`Dose de Proteínas (${protein_g_kg.toFixed(1)} g/kg) elevada. Considerar ajuste.`);
 
         const glucose_g_day = formulation.glucose?.required ?? 0;
-        const GIR_mg_kg_min = (glucose_g_day * 1000) / (weight * 1440); 
-        if (GIR_mg_kg_min > 14 && patient.condition !== 'pediatric' && patient.condition !== 'critical') warnings.push(`Taxa de Infusão de Glucose (GIR: ${GIR_mg_kg_min.toFixed(1)} mg/kg/min) muito elevada para adulto não crítico. Risco de hiperglicemia.`);
-        else if (GIR_mg_kg_min > 7 && patient.condition !== 'pediatric' && patient.condition !== 'critical') warnings.push(`Taxa de Infusão de Glucose (GIR: ${GIR_mg_kg_min.toFixed(1)} mg/kg/min) elevada. Monitorizar glicemia.`);
+        const infusionMinutes = Math.max(1, parseNum(formulation.infusionHours, 24) * 60);
+        const GIR_mg_kg_min = (glucose_g_day * 1000) / (weight * infusionMinutes);
+        if (GIR_mg_kg_min > girLimits.highWarning && patient.condition !== 'pediatric' && patient.condition !== 'critical') warnings.push(`Taxa de Infusão de Glucose (GIR: ${GIR_mg_kg_min.toFixed(1)} mg/kg/min) muito elevada para adulto não crítico. Risco de hiperglicemia.`);
+        else if (GIR_mg_kg_min > girLimits.warning && patient.condition !== 'pediatric' && patient.condition !== 'critical') warnings.push(`Taxa de Infusão de Glucose (GIR: ${GIR_mg_kg_min.toFixed(1)} mg/kg/min) elevada. Monitorizar glicemia.`);
 
         const lipid_g_kg = (formulation.lipids?.required ?? 0) / weight;
-        if (lipid_g_kg > 4.0) warnings.push(`Dose de Lípidos (${lipid_g_kg.toFixed(1)} g/kg) muito elevada. Risco de hipertrigliceridemia.`);
-        else if (lipid_g_kg > 2.5) warnings.push(`Dose de Lípidos (${lipid_g_kg.toFixed(1)} g/kg) elevada. Monitorizar triglicerídeos.`);
+        if (lipid_g_kg > lipidLimits.highWarning) warnings.push(`Dose de Lípidos (${lipid_g_kg.toFixed(1)} g/kg) muito elevada. Risco de hipertrigliceridemia.`);
+        else if (lipid_g_kg > lipidLimits.warning) warnings.push(`Dose de Lípidos (${lipid_g_kg.toFixed(1)} g/kg) elevada. Monitorizar triglicerídeos.`);
 
 
-        const ca = formulation.electrolytes?.calcium;
-        const phos = formulation.electrolytes?.phosphorus;
-        const caSol = ca?.solution ? this.solutions[ca.solution] : null;
-        const phosSol = phos?.solution ? this.solutions[phos.solution] : null;
-
-        let caConcFinal_mEq_L = 0;
-        if (ca?.volume > 0 && caSol?.calcium_concentration && totalVolumePrescription > 0) {
-            caConcFinal_mEq_L = (ca.volume * (caSol.calcium_concentration / 1000)) / (totalVolumePrescription / 1000);
-        }
-
-        let phosConcFinal_mmol_L = 0;
-        if (phos?.volume > 0 && phosSol?.phosphorus_concentration && totalVolumePrescription > 0) {
-            phosConcFinal_mmol_L = (phos.volume * (phosSol.phosphorus_concentration / 1000)) / (totalVolumePrescription / 1000);
-        }
-
-        const caPhosSum = caConcFinal_mEq_L + phosConcFinal_mmol_L; 
-        if (caConcFinal_mEq_L > 0 && phosConcFinal_mmol_L > 0) { 
-            if (caPhosSum > 45) errors.push(`Risco Elevado de Precipitação Ca/P: Soma [Ca(mEq/L)+P(mmol/L)] = ${caPhosSum.toFixed(1)} > 45. Consultar curvas de compatibilidade.`);
-            else if (caPhosSum > 30) warnings.push(`Atenção Risco Precipitação Ca/P: Soma [Ca(mEq/L)+P(mmol/L)] = ${caPhosSum.toFixed(1)} > 30. Considerar ordem de adição e tipo de AA.`);
+        const caPhosProfile = this.calculateCaPhosProfile(formulation);
+        if (caPhosProfile.hasData) { 
+            if (caPhosProfile.sum > caPhosLimits.hard) errors.push(`Risco Elevado de Precipitação Ca/P: Soma [Ca(mEq/L)+P(mmol/L)] = ${caPhosProfile.sum.toFixed(1)} > ${caPhosLimits.hard}. Consultar curvas de compatibilidade.`);
+            else if (caPhosProfile.sum > caPhosLimits.warning) warnings.push(`Atenção Risco Precipitação Ca/P: Soma [Ca(mEq/L)+P(mmol/L)] = ${caPhosProfile.sum.toFixed(1)} > ${caPhosLimits.warning}. Considerar ordem de adição e tipo de AA.`);
         }
 
         const osmLimits = this.settings.osmolarityLimits || { peripheral: 900, central: 1500 };
@@ -1811,7 +2882,7 @@ class NutriSoft {
 
         if (formulation.osmolarity > osmLimit) {
             errors.push(`ERRO Osmolaridade: ${formulation.osmolarity.toFixed(0)} mOsm/L excede o limite de ${osmLimit} mOsm/L para via ${route}. Risco de flebite/trombose.`);
-        } else if (formulation.osmolarity > osmLimit * 0.90 && route === 'peripheral') { 
+        } else if (formulation.osmolarity > osmLimit * peripheralOsmAlertRatio && route === 'peripheral') { 
             warnings.push(`Aviso Osmolaridade: ${formulation.osmolarity.toFixed(0)} mOsm/L está próxima do limite (${osmLimit} mOsm/L) para via periférica.`);
         }
 
@@ -1823,7 +2894,7 @@ class NutriSoft {
         const weight = patient.weight;
         const proteinPerKg = (formulation.proteins?.required ?? 0) / weight;
         const glucose_g_day = formulation.glucose?.required ?? 0;
-        const GIR_mg_kg_min = (glucose_g_day * 1000) / (weight * 1440);
+        const GIR_mg_kg_min = (glucose_g_day * 1000) / (weight * Math.max(1, parseNum(formulation.infusionHours, 24) * 60));
 
         if (patient.condition === 'renal') {
             if (proteinPerKg > 1.2) warnings.push(`Diretriz Renal: Dose de proteínas (${proteinPerKg.toFixed(1)} g/kg) pode necessitar de ajuste em insuficiência renal não dialítica.`);
@@ -1847,6 +2918,8 @@ class NutriSoft {
             document.getElementById('formulation-results')?.classList.add('hidden');
             document.getElementById('save-prescription-btn').disabled = true;
             document.getElementById('print-prescription-btn').disabled = true;
+            document.getElementById('preview-pdf-btn') && (document.getElementById('preview-pdf-btn').disabled = true);
+            document.getElementById('print-labels-btn') && (document.getElementById('print-labels-btn').disabled = true);
             return null;
         }
 
@@ -1858,7 +2931,9 @@ class NutriSoft {
         }
 
         const totalVolumeInput = document.getElementById('total-volume');
-        const totalVolume = this.getNumericInput('total-volume', 0, true); 
+        const totalVolume = this.getNumericInput('total-volume', 0, true);
+        const infusionHoursInput = document.getElementById('infusion-hours');
+        const infusionHours = this.getNumericInput('infusion-hours', 24, true);
         const administrationRoute = document.getElementById('administration-route')?.value || 'central';
 
         if (isNaN(totalVolume) || totalVolume <= 0) {
@@ -1870,24 +2945,48 @@ class NutriSoft {
             if (totalVolumeInput) this.hideErrorMessage(totalVolumeInput);
         }
 
+        if (isNaN(infusionHours) || infusionHours <= 0) {
+            this.dataManager.displayNotification("Horas de perfusão inválidas ou não fornecidas.", "error");
+            if (infusionHoursInput) this.showErrorMessage(infusionHoursInput, "Horas de perfusão devem ser maiores que 0.");
+            document.getElementById('formulation-results')?.classList.add('hidden');
+            return null;
+        } else if (infusionHoursInput) {
+            this.hideErrorMessage(infusionHoursInput);
+        }
+
         try {
+            const protocolId = document.getElementById('prescription-protocol')?.value || '';
+            const normalizedRoute = normalizeAdministrationRoute(administrationRoute);
             const formulation = {
-                patient: patient, 
+                patient: patient,
+                protocolId: protocolId,
                 volume: totalVolume, // Prescribed total volume
-                route: administrationRoute,
+                infusionHours: infusionHours,
+                route: normalizedRoute,
+                administrationRoute: normalizedRoute,
                 proteins: this.calculateProteins(patient),
-                glucose: this.calculateGlucose(patient),
+                glucose: this.calculateGlucose(patient, infusionHours),
                 lipids: this.calculateLipids(patient),
                 electrolytes: this.calculateElectrolytes(patient),
                 water: { required: 0, solution: 'ÁGUA DESTILADA', volume: 0, error: null }, 
                 osmolarity: 0,
                 compatibility: '',
                 warnings: [], 
-                errors: []    
+                errors: [],
+                preparationMeta: {
+                    batch: document.getElementById('prep-batch')?.value?.trim() || '—',
+                    preparer: document.getElementById('prep-operator')?.value?.trim() || this.userName || '—',
+                    checker: document.getElementById('check-operator')?.value?.trim() || '—',
+                    budHours: parseNum(document.getElementById('bud-hours')?.value, 24),
+                    storage: document.getElementById('storage-conditions')?.value?.trim() || 'Conservar 2–8°C. Proteger da luz.',
+                    photoprotection: !!document.getElementById('requires-photoprotection')?.checked
+                }
             };
 
             formulation.glutamine = this.calculateGlutamine(patient, formulation.proteins);
             formulation.additives = this.calculateAdditives(patient, formulation, totalVolume);
+            this.normalizeFormulationRoutes(formulation);
+            this.collectSelectedLots(formulation);
 
             let calculatedVolumeSum = (formulation.proteins?.volume || 0) +
                                       (formulation.glutamine?.volume || 0) +
@@ -1896,41 +2995,49 @@ class NutriSoft {
 
             Object.values(formulation.electrolytes || {}).forEach(el => calculatedVolumeSum += (el?.volume || 0));
             Object.values(formulation.additives || {}).forEach(ad => calculatedVolumeSum += (ad?.volume || 0));
-            calculatedVolumeSum = isNaN(calculatedVolumeSum) ? 0 : calculatedVolumeSum;
+            calculatedVolumeSum = isNaN(calculatedVolumeSum) ? 0 : Math.round(calculatedVolumeSum * 10) / 10;
             
             // formulation.volume here is the prescribed totalVolume
-            const waterVolumeNeeded = formulation.volume - calculatedVolumeSum; 
-            formulation.water = { 
-                required: waterVolumeNeeded, 
-                solution: 'ÁGUA DESTILADA', 
-                volume: Math.max(0, waterVolumeNeeded), 
-                error: null 
+            const waterVolumeNeeded = formulation.volume - calculatedVolumeSum;
+            const roundedWaterVolume = roundVolume(Math.max(0, waterVolumeNeeded));
+            formulation.water = {
+                required: waterVolumeNeeded,
+                solution: 'ÁGUA DESTILADA',
+                volume: roundedWaterVolume,
+                error: null
             };
 
             if (waterVolumeNeeded < 0) {
                 // Using the error message specified in the prompt
                 formulation.errors.push(`Volume total excedido! Componentes: ${calculatedVolumeSum.toFixed(1)}mL (Limite: ${formulation.volume}mL).`);
-                // The original code also had a warning, but the prompt's snippet only specified this error.
                 // Water volume is already set to Math.max(0, waterVolumeNeeded), so it will be 0 if negative.
             }
+
+            this.verifyComponentTotals(formulation);
 
             [formulation.proteins, formulation.glutamine, formulation.glucose, formulation.lipids, ...Object.values(formulation.electrolytes ?? {}), ...Object.values(formulation.additives ?? {})].forEach(comp => {
                 if (comp?.error) formulation.errors.push(comp.error);
             });
 
 
+            formulation.energy = this.calculateEnergySummary(formulation);
             formulation.osmolarity = this.calculateOsmolarity(formulation);
-            this.validateFormulationAdvanced(formulation, formulation.errors, formulation.warnings); 
-            formulation.compatibility = this.checkCompatibility(formulation, formulation.errors, formulation.warnings); 
+            this.validateFormulationAdvanced(formulation, formulation.errors, formulation.warnings);
+            this.validateSelectedLots(formulation);
+            formulation.compatibility = this.checkCompatibility(formulation, formulation.errors, formulation.warnings);
 
             this.displayResults(formulation);
 
             const saveBtn = document.getElementById('save-prescription-btn');
             const printBtn = document.getElementById('print-prescription-btn');
+            const previewBtn = document.getElementById('preview-pdf-btn');
+            const labelsBtn = document.getElementById('print-labels-btn');
             const hasCriticalErrors = formulation.errors && formulation.errors.length > 0;
 
             if (saveBtn) saveBtn.disabled = hasCriticalErrors;
             if (printBtn) printBtn.disabled = hasCriticalErrors;
+            if (previewBtn) previewBtn.disabled = hasCriticalErrors;
+            if (labelsBtn) labelsBtn.disabled = hasCriticalErrors;
 
             AuditLogger.log('calculateFormulationSuccess', { patientId: patient.id, prepVolume: totalVolume, errors: formulation.errors.length, warnings: formulation.warnings.length });
             console.log("NutriSoft.calculateFormulation: Formulation calculated:", JSON.parse(JSON.stringify(formulation))); 
@@ -1954,7 +3061,7 @@ class NutriSoft {
         if (compDetails && compatResults && formWarnings && formErrors && resultsSection) {
             try {
                 compDetails.innerHTML = this.formatCompositionDetails(formulation);
-                compatResults.innerHTML = `<p><strong>Compatibilidade e Estabilidade (Aviso):</strong> ${formulation.compatibility || 'N/A - Consultar literatura e protocolo local.'}</p>`;
+                compatResults.innerHTML = this.renderCompatibilityPanel(formulation);
                 formWarnings.innerHTML = this.formatFormulationWarnings(formulation.warnings);
                 formErrors.innerHTML = this.formatFormulationErrors(formulation.errors);
 
@@ -1972,59 +3079,201 @@ class NutriSoft {
             console.error('displayResults: One or more results display elements not found in DOM.');
         }
     }
+
+    renderCompatibilityPanel(formulation) {
+        const profile = this.calculateCaPhosProfile(formulation);
+        const statusText = formulation.compatibility || 'N/A - Consultar literatura e protocolo local.';
+        if (!profile.hasData) {
+            return `<p><strong>Compatibilidade e Estabilidade (Aviso):</strong> ${statusText}</p>`;
+        }
+
+        const hardLimit = Math.max(profile.limits.hard, 1);
+        const ratio = Math.min(1, profile.sum / hardLimit);
+        const widthPct = Math.round(ratio * 100);
+        const riskClass = profile.risk === 'high' ? 'compat-risk-high' : profile.risk === 'moderate' ? 'compat-risk-moderate' : 'compat-risk-low';
+        return `
+            <div class="compatibility-panel">
+                <p><strong>Compatibilidade e Estabilidade (Aviso):</strong> ${statusText}</p>
+                <div class="compatibility-panel__graph">
+                    <div class="compatibility-panel__title">Indicador Ca/P (mEq/L + mmol/L)</div>
+                    <div class="compatibility-panel__values">
+                        <span>Ca: ${profile.calciumConc.toFixed(1)}</span>
+                        <span>P: ${profile.phosphorusConc.toFixed(1)}</span>
+                        <span>Soma: ${profile.sum.toFixed(1)}</span>
+                    </div>
+                    <div class="compatibility-panel__bar-wrap">
+                        <div class="compatibility-panel__bar ${riskClass}" style="width: ${widthPct}%"></div>
+                    </div>
+                    <div class="compatibility-panel__limits">
+                        <span>Aviso &gt; ${profile.limits.warning}</span>
+                        <span>Limite duro &gt; ${profile.limits.hard}</span>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
     formatValue(value, unit = '', decimalPlaces = 2) { 
         if (value === undefined || value === null || isNaN(value) || !isFinite(value)) return `--- ${unit}`; 
         return `${Number(value).toFixed(decimalPlaces)} ${unit}`;
     }
-    formatCompositionDetails(formulation) { 
-         const listItem = (label, component, valueKey = 'volume', unit = 'ml', dp = 2) => {
-             if (!component || component[valueKey] === undefined || component[valueKey] === null) return '';
-             const value = component[valueKey];
-             const solution = component.solution ? `(${component.solution})` : '';
-             const errorMark = component.error ? ` <i class="fas fa-exclamation-triangle text-red-500" title="${component.error}"></i>` : '';
-             const recommended = component.recommended && valueKey !== 'volume' ? component.recommended : null;
-             const recommendedText = (recommended !== null && value !== recommended) ? ` [alvo ${this.formatValue(recommended, unit, dp)}]` : '';
-             const extra = component.fromPhosphorus && label.startsWith('Sódio') ? ` (incl. ${this.formatValue(component.fromPhosphorus, 'mEq', dp)} do Fosfato)` : '';
-             return `<li>${label}: ${this.formatValue(value, unit, dp)}${recommendedText}${extra} ${solution}${errorMark}</li>`;
-         };
-        return `
-            <h4 class="text-md font-semibold mb-2">Componentes (Volume Total: ${this.formatValue(formulation.volume, 'ml', 0)}):</h4>
-            <ul class="list-disc pl-5 space-y-1 text-sm">
-                ${listItem('Aminoácidos', formulation.proteins, 'required', 'g')}
-                ${listItem('  ↳ Volume AA', formulation.proteins, 'volume', 'ml')}
-                ${formulation.glutamine?.volume > 0 ? listItem('Glutamina (Dipeptídeo)', formulation.glutamine, 'required_g_dipeptide', 'g') : ''}
-                ${formulation.glutamine?.volume > 0 ? listItem('  ↳ Volume Glutamina', formulation.glutamine, 'volume', 'ml') : ''}
-                ${listItem('Glucose', formulation.glucose, 'required', 'g')}
-                ${listItem('  ↳ Volume Glucose', formulation.glucose, 'volume', 'ml')}
-                ${listItem('Lipídios', formulation.lipids, 'required', 'g')}
-                ${listItem('  ↳ Volume Lipídios', formulation.lipids, 'volume', 'ml')}
-                <br/>
-                ${listItem('Sódio', formulation.electrolytes?.sodium, 'required', 'mEq')}
-                ${listItem('  ↳ Volume NaCl', formulation.electrolytes?.sodium, 'volume', 'ml')}
-                ${listItem('Potássio', formulation.electrolytes?.potassium, 'required', 'mEq')}
-                ${listItem('  ↳ Volume KCl', formulation.electrolytes?.potassium, 'volume', 'ml')}
-                ${listItem('Magnésio', formulation.electrolytes?.magnesium, 'required', 'mEq')}
-                ${listItem('  ↳ Volume MgSO₄', formulation.electrolytes?.magnesium, 'volume', 'ml')}
-                ${listItem('Cálcio', formulation.electrolytes?.calcium, 'required', 'mEq')}
-                ${listItem('  ↳ Volume CaGlucon.', formulation.electrolytes?.calcium, 'volume', 'ml')}
-                ${listItem('Fósforo', formulation.electrolytes?.phosphorus, 'required', 'mmol')}
-                ${listItem('  ↳ Volume Fosfato', formulation.electrolytes?.phosphorus, 'volume', 'ml')}
-                <br/>
-                ${listItem('Oligoelementos', formulation.additives?.oligoelements, 'volume', 'ml')}
-                ${listItem('Vit. Hidrossolúveis', formulation.additives?.water_soluble_vitamins, 'volume', 'ml')}
-                ${listItem('Vit. Lipossolúveis', formulation.additives?.fat_soluble_vitamins, 'volume', 'ml')}
-                ${formulation.additives?.insulin?.required > 0 ? listItem('Insulina', formulation.additives?.insulin, 'required', 'UI') : ''}
-                ${formulation.additives?.insulin?.required > 0 ? listItem('  ↳ Volume Insulina', formulation.additives?.insulin, 'volume', 'ml', 3) : ''}
-                ${formulation.additives?.heparin?.required > 0 ? listItem('Heparina', formulation.additives?.heparin, 'required', 'UI') : ''}
-                ${formulation.additives?.heparin?.required > 0 ? listItem('  ↳ Volume Heparina', formulation.additives?.heparin, 'volume', 'ml', 3) : ''}
-                ${formulation.additives?.carnitine?.required > 0 ? listItem('Carnitina', formulation.additives?.carnitine, 'required', 'mg') : ''}
-                ${formulation.additives?.carnitine?.required > 0 ? listItem('  ↳ Volume Carnitina', formulation.additives?.carnitine, 'volume', 'ml') : ''}
-                <br/>
-                ${listItem('Água Estéril Adicionada', formulation.water, 'volume', 'ml')}
-            </ul>
-            <p class="mt-3 font-semibold">Osmolaridade Calculada: <strong>${this.formatValue(formulation.osmolarity, 'mOsm/L', 0)}</strong></p>
-            <p class="text-sm text-gray-600">Via de Administração: ${formulation.route === 'peripheral' ? 'Periférica' : 'Central'}</p>
+
+    getSolutionConcentrationSummary(solutionName) {
+        const details = this.solutions?.[solutionName];
+        if (!details) return solutionName || '—';
+        const fields = [
+            details.protein_concentration ? `Prot ${details.protein_concentration} g/L` : null,
+            details.glucose_concentration ? `Gluc ${details.glucose_concentration} g/L` : null,
+            details.lipid_concentration ? `Lip ${details.lipid_concentration} mg/ml` : null,
+            details.sodium_concentration ? `Na ${details.sodium_concentration} mEq/L` : null,
+            details.potassium_concentration ? `K ${details.potassium_concentration} mEq/L` : null,
+            details.calcium_concentration ? `Ca ${details.calcium_concentration} mEq/L` : null,
+            details.phosphorus_concentration ? `P ${details.phosphorus_concentration} mmol/L` : null
+        ].filter(Boolean);
+        if (!fields.length) return solutionName;
+        return `${solutionName} · ${fields.slice(0, 2).join(' · ')}`;
+    }
+
+    formatCompositionDetails(formulation) {
+        const patient = formulation.patient || {};
+        const weight = Number(patient.weight) || 0;
+        const energy = formulation.energy || {};
+        const proteins = formulation.proteins || {};
+        const glucose = formulation.glucose || {};
+        const lipids = formulation.lipids || {};
+        const sodium = formulation.electrolytes?.sodium;
+
+        const macroRows = [
+            {
+                label: 'Aminoácidos',
+                total: this.formatValue(proteins.required, 'g', 1),
+                perKg: weight > 0 ? `${(proteins.required / weight).toFixed(2)} g/kg` : '---',
+                energy: this.formatValue(energy.proteins, 'kcal', 0),
+                notes: `N: ${this.formatValue(proteins.nitrogen, 'g', 2)}${proteins.source === 'direct' ? ' · Prescrito' : ''}`
+            },
+            {
+                label: 'Glucose',
+                total: this.formatValue(glucose.required, 'g', 1),
+                perKg: weight > 0 ? `${(glucose.required / weight).toFixed(2)} g/kg` : '---',
+                energy: this.formatValue(energy.glucose, 'kcal', 0),
+                notes: `GIR: ${energy.GIR ? energy.GIR.toFixed(2) : '---'} mg/kg/min`
+            },
+            {
+                label: 'Lípidos',
+                total: this.formatValue(lipids.required, 'g', 1),
+                perKg: weight > 0 ? `${(lipids.required / weight).toFixed(2)} g/kg` : '---',
+                energy: this.formatValue(energy.lipids, 'kcal', 0),
+                notes: lipids.source === 'direct' ? 'Prescrito' : ''
+            },
+            {
+                label: 'Energia Total',
+                total: this.formatValue(energy.total, 'kcal', 0),
+                perKg: weight > 0 ? `${energy.perKg.toFixed(1)} kcal/kg` : '---',
+                energy: '',
+                notes: `Glicose %: ${energy.glucosePercent ? energy.glucosePercent.toFixed(1) : '---'}%`
+            }
+        ];
+
+        const componentRows = [];
+        const pushComponent = (label, component, options = {}) => {
+            if (!component) return;
+            const doseKey = options.doseKey || 'required';
+            const volumeKey = options.volumeKey || 'volume';
+            const dose = component[doseKey];
+            const volume = component[volumeKey];
+            const hasDose = Number.isFinite(dose) && dose !== 0;
+            const hasVolume = Number.isFinite(volume) && volume !== 0;
+            if (!hasDose && !hasVolume && !component.error) return;
+            const doseUnit = options.doseUnit || '';
+            const volumeUnit = options.volumeUnit || 'ml';
+            const doseDp = options.doseDp ?? (doseUnit === 'mg' ? 0 : 2);
+            const volumeDp = options.volumeDp ?? 1;
+            const notes = [];
+            if (component.recommended !== undefined && component.recommended !== null && doseKey !== 'volume') {
+                if (Number.isFinite(component.recommended) && component.recommended > 0 && component.recommended !== dose) {
+                    notes.push(`Alvo ${this.formatValue(component.recommended, doseUnit, doseDp)}`);
+                }
+            }
+            if (component.source) {
+                notes.push(component.source === 'direct' ? 'Dose prescrita' : 'Calculado a partir de metas');
+            }
+            if (component.fromPhosphorus && label.startsWith('Sódio')) {
+                notes.push(`${this.formatValue(component.fromPhosphorus, 'mEq', 2)} do Fosfato`);
+            }
+            if (component.error) {
+                notes.push(`⚠ ${component.error}`);
+            }
+            if (options.extraNote) notes.push(options.extraNote);
+
+            componentRows.push({
+                label,
+                dose: this.formatValue(dose, doseUnit, doseDp),
+                solution: component.solution || '',
+                volume: this.formatValue(volume, volumeUnit, volumeDp),
+                notes: notes.filter(Boolean).join(' · ')
+            });
+        };
+
+        pushComponent('Aminoácidos', proteins, { doseUnit: 'g', doseDp: 1 });
+        if (formulation.glutamine?.volume > 0) {
+            pushComponent('Glutamina (Dipeptídeo)', formulation.glutamine, { doseKey: 'required_g_dipeptide', doseUnit: 'g', doseDp: 2 });
+        }
+        pushComponent('Glucose', glucose, { doseUnit: 'g', doseDp: 1 });
+        pushComponent('Lípidos', lipids, { doseUnit: 'g', doseDp: 1 });
+        pushComponent('Sódio (Total)', sodium, { doseKey: 'displayRequired', doseUnit: 'mEq', extraNote: sodium?.fromPhosphorus ? '' : undefined });
+        pushComponent('Potássio', formulation.electrolytes?.potassium, { doseUnit: 'mEq' });
+        pushComponent('Magnésio', formulation.electrolytes?.magnesium, { doseUnit: 'mEq' });
+        pushComponent('Cálcio', formulation.electrolytes?.calcium, { doseUnit: 'mEq' });
+        pushComponent('Fósforo', formulation.electrolytes?.phosphorus, { doseUnit: 'mmol' });
+        pushComponent('Oligoelementos', formulation.additives?.oligoelements, { doseKey: 'volume', doseUnit: 'ml' });
+        pushComponent('Vit. Hidrossolúveis', formulation.additives?.water_soluble_vitamins, { doseKey: 'volume', doseUnit: 'ml' });
+        pushComponent('Vit. Lipossolúveis', formulation.additives?.fat_soluble_vitamins, { doseKey: 'volume', doseUnit: 'ml' });
+        if (formulation.additives?.insulin?.required > 0) {
+            pushComponent('Insulina', formulation.additives.insulin, { doseUnit: 'UI', volumeDp: 3 });
+        }
+        if (formulation.additives?.heparin?.required > 0) {
+            pushComponent('Heparina', formulation.additives.heparin, { doseUnit: 'UI', volumeDp: 3 });
+        }
+        if (formulation.additives?.carnitine?.required > 0) {
+            pushComponent('Carnitina', formulation.additives.carnitine, { doseUnit: 'mg' });
+        }
+        pushComponent('Água Estéril', formulation.water, { doseKey: 'volume', doseUnit: 'ml' });
+
+        const macroTable = `
+            <div class="mb-4">
+                <h4 class="text-md font-semibold mb-2">Resumo Nutricional</h4>
+                <table class="summary-table">
+                    <thead>
+                        <tr><th>Componente</th><th>Dose Total</th><th>Dose / kg</th><th>Energia</th><th>Notas</th></tr>
+                    </thead>
+                    <tbody>
+                        ${macroRows.map(row => `<tr><th>${row.label}</th><td>${row.total}</td><td>${row.perKg}</td><td>${row.energy}</td><td>${row.notes || ''}</td></tr>`).join('')}
+                    </tbody>
+                </table>
+            </div>
         `;
+
+        const componentsTable = `
+            <div>
+                <h4 class="text-md font-semibold mb-2">Componentes e Volumes (Volume Total: ${this.formatValue(formulation.volume, 'ml', 0)})</h4>
+                <table class="component-table">
+                    <thead><tr><th>Componente</th><th>Dose</th><th>Solução</th><th>Volume</th><th>Notas</th></tr></thead>
+                    <tbody>
+                        ${componentRows.map(row => `<tr><th>${row.label}</th><td>${row.dose}</td><td>${row.solution}</td><td>${row.volume}</td><td>${row.notes || ''}</td></tr>`).join('')}
+                    </tbody>
+                </table>
+            </div>
+        `;
+
+        const metricsBlock = `
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs mt-4">
+                <div class="metric-card"><span class="metric-label">Osmolaridade</span><span class="metric-value">${this.formatValue(formulation.osmolarity, 'mOsm/L', 0)}</span></div>
+                <div class="metric-card"><span class="metric-label">Via</span><span class="metric-value">${routeLabel(formulation.route)}</span></div>
+                <div class="metric-card"><span class="metric-label">Energia/kg</span><span class="metric-value">${weight > 0 ? `${energy.perKg.toFixed(1)} kcal/kg` : '---'}</span></div>
+            </div>
+        `;
+
+        return `${macroTable}${componentsTable}${metricsBlock}`;
     }
     formatFormulationWarnings(warnings) { 
         if (!warnings || warnings.length === 0) return '<p class="text-green-600"><i class="fas fa-check-circle mr-2"></i>Sem avisos de formulação.</p>'; 
@@ -2170,9 +3419,10 @@ class NutriSoft {
 
         const preparation = {
             preparationNumber: existingPrescription ? existingPrescription.preparationNumber : this.dataManager.getNextPreparationNumber(),
-            patientId: formulation.patient.id, 
-            patientName: formulation.patient.name, 
-            date: new Date().toISOString().split('T')[0], 
+            patientId: formulation.patient.id,
+            patientName: formulation.patient.name,
+            protocolId: formulation.protocolId || '',
+            date: new Date().toISOString().split('T')[0],
             volume: formulation.volume,
             osmolarity: formulation.osmolarity,
             preparationMap: this.generatePreparationMap(formulation), 
@@ -2208,6 +3458,8 @@ class NutriSoft {
         this.currentPrescriptionIndex = null; 
         document.getElementById('save-prescription-btn').disabled = true;
         document.getElementById('print-prescription-btn').disabled = true;
+            document.getElementById('preview-pdf-btn') && (document.getElementById('preview-pdf-btn').disabled = true);
+            document.getElementById('print-labels-btn') && (document.getElementById('print-labels-btn').disabled = true);
 
         console.log(`NutriSoft.savePrescription: Prescription ${logAction} successful for prep #${preparation.preparationNumber}`);
     }
@@ -2252,6 +3504,8 @@ class NutriSoft {
                 </td>`;
         });
         this.checkAccessPermissions(); 
+        this.renderLots();
+        this.renderLotSelectors();
     }
     renderReports(filteredPrescriptions = this.prescriptions) { 
         const reportsTbody = document.getElementById('reports-list-body');
@@ -2278,18 +3532,22 @@ class NutriSoft {
              const patientNameDisplay = patient ? patient.name : `(${prescription.patientName || 'Doente Excluído'})`;
             const row = reportsTbody.insertRow(reportsTbody.rows.length - (noResultsRow ? 1 : 0));
             row.classList.add('hover:bg-gray-50');
+            const status = prescription.productionStatus || 'Pendente';
             row.innerHTML = `
-                <td class="p-3">${prescription.preparationNumber || '-'}</td>
-                <td class="p-3">${prescription.date ? new Date(prescription.date).toLocaleDateString() : '-'}</td>
+                <td class="p-3">${prescription.date ? new Date(prescription.date).toLocaleString() : '-'}</td>
                 <td class="p-3">${patientNameDisplay}</td>
                 <td class="p-3">${this.formatValue(prescription.volume, 'ml', 0)}</td>
-                <td class="p-3">${this.formatValue(prescription.osmolarity, 'mOsm/L', 0)}</td>
-                <td class="p-3">${prescription.createdBy || '-'}</td>
-                <td class="p-3">${prescription.createdAt ? new Date(prescription.createdAt).toLocaleDateString() : '-'}</td>
-                 <td class="p-3 whitespace-nowrap text-right">
+                <td class="p-3">${routeLabel(prescription.route || prescription.formulation?.route)}</td>
+                <td class="p-3">
+                    <select class="input-field text-xs py-1 px-2" data-action="update-status" data-prep-number="${prescription.preparationNumber}">
+                        ${['Pendente', 'Aprovada', 'Produzida', 'Rejeitada'].map(s => `<option value="${s}" ${s === status ? 'selected' : ''}>${s}</option>`).join('')}
+                    </select>
+                </td>
+                <td class="p-3 whitespace-nowrap text-right">
                      <button data-action="view" data-prep-number="${prescription.preparationNumber}" class="table-action-btn text-blue-600 hover:text-blue-800 mr-2" title="Visualizar Detalhes"><i class="fas fa-eye"></i></button>
                      <button data-action="edit" data-prep-number="${prescription.preparationNumber}" class="table-action-btn text-yellow-600 hover:text-yellow-800 mr-2" title="Editar Prescrição"><i class="fas fa-edit"></i></button>
                      <button data-action="print" data-prep-number="${prescription.preparationNumber}" class="table-action-btn text-green-600 hover:text-green-800 mr-2" title="Imprimir Prescrição"><i class="fas fa-print"></i></button>
+                     <button data-action="labels" data-prep-number="${prescription.preparationNumber}" class="table-action-btn text-indigo-600 hover:text-indigo-800 mr-2" title="Imprimir Rótulo"><i class="fas fa-tags"></i></button>
                      <button data-action="delete" data-prep-number="${prescription.preparationNumber}" class="table-action-btn text-red-600 hover:text-red-800" title="Eliminar Prescrição"><i class="fas fa-trash"></i></button>
                  </td>`;
         });
@@ -2333,6 +3591,8 @@ class NutriSoft {
         document.getElementById('calculate-formulation-btn').disabled = false;
         document.getElementById('save-prescription-btn').disabled = true; 
         document.getElementById('print-prescription-btn').disabled = true; 
+            document.getElementById('preview-pdf-btn') && (document.getElementById('preview-pdf-btn').disabled = true);
+            document.getElementById('print-labels-btn') && (document.getElementById('print-labels-btn').disabled = true);
 
         this.currentPrescriptionIndex = originalIndex; 
         window.location.hash = 'prescription'; 
@@ -2380,13 +3640,15 @@ class NutriSoft {
 
         this.setInputValue('prescription-patient', patientId);
         this.setInputValue('total-volume', formulation.volume);
-        this.setInputValue('administration-route', formulation.route || 'central');
+        this.setInputValue('infusion-hours', formulation.infusionHours ?? 24);
+        this.setInputValue('administration-route', normalizeAdministrationRoute(formulation.route || formulation.administrationRoute));
 
         if (patientWeight > 0) {
             this.setInputValue('protein-needs', (formulation.proteins?.required / patientWeight).toFixed(2));
             this.setInputValue('lipid-needs', (formulation.lipids?.required / patientWeight).toFixed(2));
             const glucose_g_day = formulation.glucose?.required ?? 0;
-            const GIR_mg_kg_min = (glucose_g_day * 1000) / (patientWeight * 1440);
+            const infusionMinutes = Math.max(1, parseNum(formulation.infusionHours, 24) * 60);
+            const GIR_mg_kg_min = (glucose_g_day * 1000) / (patientWeight * infusionMinutes);
             this.setInputValue('glucose-rate', GIR_mg_kg_min.toFixed(2));
 
             this.setInputValue('sodium-needs', (formulation.electrolytes?.sodium?.required / patientWeight).toFixed(2));
@@ -2422,63 +3684,417 @@ class NutriSoft {
         this.setInputValue('cacl2-solution', formulation.electrolytes?.calcium?.solution); 
         this.setInputValue('mgso4-solution', formulation.electrolytes?.magnesium?.solution);
         this.setInputValue('phosphorus-solution', formulation.electrolytes?.phosphorus?.solution);
+        this.setInputValue('prescription-protocol', formulation.protocolId || '');
     }
-    printPrescription(originalIndex = null) { 
-        console.log("NutriSoft.printPrescription: Preparing to print. Original Index:", originalIndex);
+    buildPdfExportContext(originalIndex = null) {
         let formulationToPrint;
-        let prepDetails = { prepNum: 'N/A (Não Salvo)', patientName: 'N/A', date: new Date().toISOString(), map: '' };
+        let prepDetails = { prepNum: 'N/A', patientName: '—', date: new Date().toISOString(), map: '' };
         let logDetails = {};
 
+        if (originalIndex !== null && originalIndex >= 0 && originalIndex < this.prescriptions.length) {
+            const p = this.prescriptions[originalIndex];
+            if (!p?.formulation) throw new Error(`Dados da formulação inválidos para prescrição #${p?.preparationNumber}.`);
+            formulationToPrint = p.formulation;
+            prepDetails = {
+                prepNum: p.preparationNumber,
+                patientName: p.patientName || p.formulation.patient?.name || '—',
+                date: p.date || p.createdAt || new Date().toISOString(),
+                map: p.preparationMap || this.generatePreparationMap(p.formulation)
+            };
+            logDetails = { prepId: prepDetails.prepNum, source: 'history', index: originalIndex };
+        } else {
+            formulationToPrint = this.calculateFormulation();
+            if (!formulationToPrint) {
+                throw new Error('Não foi possível calcular a formulação para exportação PDF.');
+            }
+            if (formulationToPrint.errors?.length > 0) {
+                throw new Error('Formulação contém ERROS CRÍTICOS e não pode ser impressa.');
+            }
+            const nextPrepNumEstimate = (this.dataManager.getData(this.dataManager.preparationCounterKey) || 0) + 1;
+            prepDetails = {
+                prepNum: `(Não Salvo - Est. #${nextPrepNumEstimate})`,
+                patientName: formulationToPrint.patient?.name || '—',
+                date: new Date().toISOString(),
+                map: this.generatePreparationMap(formulationToPrint)
+            };
+            logDetails = { patientId: formulationToPrint.patient?.id, source: 'current_calculation' };
+        }
+
+        return { formulationToPrint, prepDetails, logDetails };
+    }
+
+    validatePdfPayload(formulation, preparationMap, preparationNumber) {
+        const issues = [];
+        if (!formulation || typeof formulation !== 'object') issues.push('Formulação em falta.');
+        if (!preparationNumber) issues.push('Número de preparação em falta.');
+        if (!formulation?.patient) issues.push('Dados do doente em falta.');
+        if (!preparationMap || String(preparationMap).trim().length < 5) issues.push('Mapa de preparação vazio.');
+        return { ok: issues.length === 0, issues };
+    }
+
+    async loadImageAsDataUrl(url) {
+        return new Promise((resolve) => {
+            if (!url) return resolve(null);
+            const img = new Image();
+            img.crossOrigin = 'anonymous';
+            img.onload = () => {
+                try {
+                    const canvas = document.createElement('canvas');
+                    canvas.width = img.naturalWidth || img.width;
+                    canvas.height = img.naturalHeight || img.height;
+                    const ctx = canvas.getContext('2d');
+                    if (!ctx) return resolve(null);
+                    ctx.drawImage(img, 0, 0);
+                    resolve(canvas.toDataURL('image/png'));
+                } catch (err) {
+                    console.warn('Falha ao converter imagem para DataURL:', err);
+                    resolve(null);
+                }
+            };
+            img.onerror = () => resolve(null);
+            img.src = url;
+        });
+    }
+
+    async generateQrDataUrl(text) {
+        return new Promise((resolve) => {
+            try {
+                if (typeof QRCode === 'undefined') {
+                    resolve(this.generateFallbackCodeDataUrl(text));
+                    return;
+                }
+                const wrapper = document.createElement('div');
+                wrapper.style.position = 'fixed';
+                wrapper.style.left = '-10000px';
+                wrapper.style.top = '-10000px';
+                document.body.appendChild(wrapper);
+
+                new QRCode(wrapper, {
+                    text: String(text || ''),
+                    width: 180,
+                    height: 180,
+                    correctLevel: QRCode.CorrectLevel.M
+                });
+
+                setTimeout(() => {
+                    try {
+                        const canvas = wrapper.querySelector('canvas');
+                        const img = wrapper.querySelector('img');
+                        let data = null;
+                        if (canvas?.toDataURL) data = canvas.toDataURL('image/png');
+                        else if (img?.src) data = img.src;
+                        wrapper.remove();
+                        resolve(data || null);
+                    } catch (innerErr) {
+                        wrapper.remove();
+                        resolve(null);
+                    }
+                }, 25);
+            } catch (err) {
+                console.warn('Falha ao gerar QR:', err);
+                resolve(this.generateFallbackCodeDataUrl(text));
+            }
+        });
+    }
+
+    generateFallbackCodeDataUrl(text) {
         try {
-            if (originalIndex !== null && originalIndex >= 0 && originalIndex < this.prescriptions.length) {
-                const p = this.prescriptions[originalIndex];
-                if (!p?.formulation) throw new Error(`Dados da formulação inválidos para prescrição #${p?.preparationNumber}.`);
-                formulationToPrint = p.formulation;
-                prepDetails = {
-                    prepNum: p.preparationNumber,
-                    patientName: p.patientName || p.formulation.patient?.name || 'Desconhecido',
-                    date: p.date || p.createdAt,
-                    map: p.preparationMap || this.generatePreparationMap(p.formulation) 
-                };
-                logDetails = { prepId: prepDetails.prepNum, source: 'history', index: originalIndex };
-                console.log("Printing existing prescription:", prepDetails.prepNum);
-            } else { 
-                console.log("Attempting to print current, unsaved formulation...");
-                formulationToPrint = this.calculateFormulation(); 
-                if (!formulationToPrint) {
-                    this.dataManager.displayNotification('Não foi possível calcular a formulação para impressão. Verifique os dados e tente calcular primeiro.', 'warning');
-                    return;
+            const payload = String(text || '');
+            const size = 180;
+            const canvas = document.createElement('canvas');
+            canvas.width = size;
+            canvas.height = size;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) return null;
+
+            ctx.fillStyle = '#FFFFFF';
+            ctx.fillRect(0, 0, size, size);
+            ctx.fillStyle = '#111827';
+
+            const seed = hashString(payload);
+            const cellSize = 10;
+            const cells = 14;
+            const start = 20;
+
+            for (let row = 0; row < cells; row++) {
+                for (let col = 0; col < cells; col++) {
+                    const bitIdx = (row * cells + col) % 31;
+                    const bit = (seed >> bitIdx) & 1;
+                    if (bit || row === 0 || col === 0 || row === cells - 1 || col === cells - 1) {
+                        ctx.fillRect(start + col * cellSize, start + row * cellSize, cellSize - 1, cellSize - 1);
+                    }
                 }
-                if (formulationToPrint.errors?.length > 0) {
-                    this.dataManager.displayNotification('Formulação contém ERROS CRÍTICOS e não pode ser impressa. Corrija os erros.', 'error');
-                    return;
-                }
-                const nextPrepNumEstimate = (this.dataManager.getData(this.dataManager.preparationCounterKey) || 0) + 1;
-                prepDetails = {
-                    prepNum: `(Não Salvo - Est. #${nextPrepNumEstimate})`,
-                    patientName: formulationToPrint.patient?.name || 'Desconhecido',
-                    date: new Date().toISOString(), 
-                    map: this.generatePreparationMap(formulationToPrint)
-                };
-                logDetails = { patientId: formulationToPrint.patient?.id, source: 'current_calculation' };
-                console.log("Printing newly calculated, unsaved formulation for patient:", prepDetails.patientName);
             }
 
-            if (!window.jspdf || !window.jspdf.jsPDF) {
-                console.error("jsPDF library is not loaded. Cannot generate PDF.");
-                this.dataManager.displayNotification("Erro: Biblioteca jsPDF não carregada. PDF não pode ser gerado.", "error");
-                AuditLogger.log('printPrescriptionError', { ...logDetails, error: 'jsPDF not loaded' });
-                return;
-            }
-
-            AuditLogger.log('printPrescriptionInitiated', logDetails);
-            this.exportPDF(formulationToPrint, prepDetails.map, prepDetails.prepNum, prepDetails.patientName, prepDetails.date);
-            this.dataManager.displayNotification('Gerando PDF da prescrição...', 'info');
-
+            ctx.fillStyle = '#374151';
+            ctx.font = '11px sans-serif';
+            ctx.fillText('ID', 8, size - 18);
+            ctx.fillText(payload.slice(0, 18), 24, size - 18);
+            return canvas.toDataURL('image/png');
         } catch (error) {
-            console.error("NutriSoft.printPrescription: Error during print preparation:", error);
-            this.dataManager.displayNotification(`Erro ao preparar impressão: ${error.message}. Verifique o console.`, 'error');
-            AuditLogger.log('printPrescriptionError', { ...logDetails, error: error.message, stack: error.stack });
+            console.warn('Falha no código fallback:', error);
+            return null;
+        }
+    }
+
+    async preloadPdfAssets(formulation, preparationNumber, patientName, prescriptionDate) {
+        const qrPayload = JSON.stringify({
+            prep: preparationNumber || 'N/A',
+            patient: patientName || formulation?.patient?.name || '—',
+            date: prescriptionDate || new Date().toISOString(),
+            volume: formulation?.volume ?? null
+        });
+
+        const [logoDataUrl, qrDataUrl] = await Promise.all([
+            this.loadImageAsDataUrl('ULSSMsgtf.jpg'),
+            this.generateQrDataUrl(qrPayload)
+        ]);
+
+        return { logoDataUrl, qrDataUrl, qrPayload };
+    }
+
+    buildLabelPayload(formulation, preparationNumber, patientName, prescriptionDate) {
+        const dt = prescriptionDate ? new Date(prescriptionDate) : new Date();
+        return {
+            prep: preparationNumber || 'N/A',
+            patient: patientName || formulation?.patient?.name || '—',
+            service: formulation?.patient?.service || '—',
+            date: Number.isNaN(dt.getTime()) ? '—' : dt.toLocaleDateString('pt-PT'),
+            time: Number.isNaN(dt.getTime()) ? '—' : dt.toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' }),
+            volume: this.formatValue(formulation?.volume ?? 0, 'ml', 0),
+            route: formulation?.administrationRoute || '—',
+            osm: Number.isFinite(formulation?.osmolarity) ? `${formulation.osmolarity.toFixed(0)} mOsm/L` : 'estimado',
+            energy: this.formatValue(formulation?.energy?.total ?? 0, 'kcal', 0),
+            batch: formulation?.preparationMeta?.batch || '—',
+            budHours: parseNum(formulation?.preparationMeta?.budHours, 24)
+        };
+    }
+
+    async printPrescription(originalIndex = null) {
+        let details;
+        try {
+            details = this.buildPdfExportContext(originalIndex);
+            const { formulationToPrint, prepDetails, logDetails } = details;
+            AuditLogger.log('printPrescriptionInitiated', logDetails);
+            this.dataManager.displayNotification('Gerando PDF da prescrição...', 'info');
+            await this.exportPDF(formulationToPrint, prepDetails.map, prepDetails.prepNum, prepDetails.patientName, prepDetails.date, { mode: 'save' });
+        } catch (error) {
+            console.error('NutriSoft.printPrescription: Error during print preparation:', error);
+            this.dataManager.displayNotification(`Erro ao preparar impressão: ${error.message}.`, 'error');
+            AuditLogger.log('printPrescriptionError', {
+                ...(details?.logDetails || {}),
+                error: error.message,
+                stack: error.stack
+            });
+        }
+    }
+
+    async previewPrescriptionPDF(originalIndex = null) {
+        let details;
+        try {
+            details = this.buildPdfExportContext(originalIndex);
+            const { formulationToPrint, prepDetails, logDetails } = details;
+            AuditLogger.log('previewPDFInitiated', logDetails);
+            this.showPrintPreviewModal({
+                formulation: formulationToPrint,
+                preparationMap: prepDetails.map,
+                prepNumber: prepDetails.prepNum,
+                patientName: prepDetails.patientName,
+                prescriptionDate: prepDetails.date
+            });
+        } catch (error) {
+            console.error('NutriSoft.previewPrescriptionPDF:', error);
+            this.dataManager.displayNotification(`Erro na pré-visualização do PDF: ${error.message}.`, 'error');
+            AuditLogger.log('previewPDFError', { ...(details?.logDetails || {}), error: error.message, stack: error.stack });
+        }
+    }
+
+    showPrintPreviewModal(payload) {
+        this.currentPreviewData = payload;
+        const modal = document.getElementById('print-preview-modal');
+        if (!modal) return;
+        modal.classList.remove('hidden');
+        document.body.classList.add('modal-open');
+        this.setPreviewTab('map');
+    }
+
+    hidePrintPreviewModal() {
+        const modal = document.getElementById('print-preview-modal');
+        if (!modal) return;
+        modal.classList.add('hidden');
+        document.body.classList.remove('modal-open');
+    }
+
+    setPreviewTab(tab) {
+        const btnMap = document.getElementById('preview-tab-map');
+        const btnLabel = document.getElementById('preview-tab-label');
+        const content = document.getElementById('print-preview-content');
+        const actionBtn = document.getElementById('print-preview-action-btn');
+        if (!this.currentPreviewData || !content || !btnMap || !btnLabel || !actionBtn) return;
+
+        const isMap = tab === 'map';
+        btnMap.classList.toggle('active', isMap);
+        btnMap.classList.toggle('bg-blue-50', isMap);
+        btnLabel.classList.toggle('active', !isMap);
+        btnLabel.classList.toggle('bg-blue-50', !isMap);
+        actionBtn.innerHTML = isMap ? '<i class="fas fa-print mr-2"></i>Imprimir Mapa' : '<i class="fas fa-print mr-2"></i>Imprimir Rótulo';
+        content.innerHTML = isMap
+            ? this.renderProductionMapPreviewHtml(this.currentPreviewData)
+            : this.renderLabelPreviewHtml(this.currentPreviewData);
+        content.dataset.currentTab = tab;
+    }
+
+    printCurrentPreviewTab() {
+        const content = document.getElementById('print-preview-content');
+        if (!content) return;
+        const html = content.innerHTML;
+        const w = window.open('', '_blank', 'width=980,height=900');
+        if (!w) return;
+        w.document.write(`
+            <html><head><title>Print Preview</title>
+            <style>
+                body{font-family:Segoe UI,Arial,sans-serif;padding:16px;background:white;}
+                table{width:100%;border-collapse:collapse}
+                th,td{border-bottom:1px solid #d7e0ec;padding:6px 4px;text-align:left}
+                .pp-label-card{max-width:520px;border:2px solid #22314d;border-radius:16px;margin:0 auto;padding:18px}
+                .pp-kpi{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;background:#f3f6fb;border:1px solid #d5deea;border-radius:8px;padding:10px;margin-bottom:14px}
+                .pp-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px 18px}
+                .pp-divider{border-top:2px solid #1e293b;margin:10px 0 12px}
+                .pp-title{font-size:42px;font-weight:800;margin:0 0 4px}
+                .pp-subtitle{margin:0 0 10px;color:#4b6382}
+            </style></head><body>${html}</body></html>
+        `);
+        w.document.close();
+        w.focus();
+        w.print();
+    }
+
+    renderProductionMapPreviewHtml({ formulation, prepNumber, patientName }) {
+        const patient = formulation?.patient || {};
+        const energy = formulation?.energy || {};
+        const components = this.buildPreviewComponentRows(formulation);
+        const now = new Date();
+        const nowText = `${now.toLocaleDateString('pt-PT')} ${now.toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' })}`;
+        return `
+            <div>
+                <div class="pp-topline">
+                    <span>${nowText}</span>
+                    <span>NutriSoft</span>
+                    <span>#Prep ${prepNumber || '—'}</span>
+                </div>
+                <div class="pp-title">MAPA DE PRODUÇÃO</div>
+                <div class="pp-subtitle">Nutrição Parentérica</div>
+                <div class="pp-divider"></div>
+                <div class="pp-grid">
+                    <div><strong>Doente:</strong> ${patientName || patient.name || '—'}</div>
+                    <div><strong>Volume Total:</strong> ${this.formatValue(formulation.volume, 'mL', 0)}</div>
+                    <div><strong>ID:</strong> ${patient.idNumber || patient.processNumber || '—'}</div>
+                    <div><strong>Perfusão:</strong> ${formulation.infusionHours || 24} h</div>
+                    <div><strong>Serviço:</strong> ${patient.service || '—'}</div>
+                    <div><strong>Via:</strong> ${routeLabel(formulation.route || formulation.administrationRoute)}</div>
+                    <div><strong>Peso:</strong> ${this.formatValue(patient.weight, 'kg', 0)}</div>
+                    <div><strong>Osmolaridade:</strong> ${this.formatValue(formulation.osmolarity, 'mOsm/L', 0)}</div>
+                </div>
+                <div class="pp-kpi">
+                    <div><div class="text-xs">ENERGIA TOTAL</div><strong>${this.formatValue(energy.total, 'kcal', 0)}</strong></div>
+                    <div><div class="text-xs">RÁCIO NPC:N</div><strong>${energy.NPCtoNRatio ? energy.NPCtoNRatio.toFixed(0) : '—'}:1</strong></div>
+                    <div><div class="text-xs">GIR</div><strong>${energy.GIR ? energy.GIR.toFixed(2) : '—'} mg/kg/min</strong></div>
+                </div>
+                <table class="pp-table">
+                    <thead><tr><th>Ordem</th><th>Componente</th><th>Solução</th><th>Lote</th><th style="text-align:right">Quantidade</th><th>Check</th></tr></thead>
+                    <tbody>
+                        ${components.map((r, i) => `<tr><td>${i + 1}</td><td><strong>${r.label}</strong></td><td>${r.solution}</td><td>${r.lot || '-'}</td><td style="text-align:right"><strong>${r.volume} mL</strong></td><td>☐</td></tr>`).join('')}
+                    </tbody>
+                </table>
+                <div class="pp-signatures">
+                    <div>
+                        <strong>Preparador (Assinatura)</strong>
+                        <div class="pp-sign-line"></div>
+                        <div>Data: __/__/____ &nbsp;&nbsp; Hora: __:__</div>
+                    </div>
+                    <div>
+                        <strong>Conferente (Assinatura)</strong>
+                        <div class="pp-sign-line"></div>
+                        <div>Data: __/__/____ &nbsp;&nbsp; Hora: __:__</div>
+                    </div>
+                </div>
+                <div class="pp-footer">https://nutrisoft.local · 1/1</div>
+            </div>
+        `;
+    }
+
+    renderLabelPreviewHtml({ formulation, patientName }) {
+        const patient = formulation?.patient || {};
+        const energy = formulation?.energy || {};
+        return `
+            <div class="pp-label-card">
+                <div style="text-align:center;font-size:56px;font-weight:800;letter-spacing:1px;">NUTRIÇÃO PARENTÉRICA</div>
+                <div style="text-align:center;font-size:22px;font-weight:700;letter-spacing:1px;">USO INTRAVENOSO</div>
+                <div class="pp-divider"></div>
+                <div><strong>Doente:</strong> ${patientName || patient.name || '—'}</div>
+                <div><strong>Serviço:</strong> ${patient.service || '—'}</div>
+                <div class="pp-kpi" style="grid-template-columns:1fr 1fr;margin-top:10px">
+                    <div><div class="text-xs">VOLUME</div><strong>${this.formatValue(formulation.volume, 'mL', 0)}</strong></div>
+                    <div><div class="text-xs">VIA</div><strong>${routeLabel(formulation.route || formulation.administrationRoute)}</strong></div>
+                    <div><div class="text-xs">PERFUSÃO</div><strong>${formulation.infusionHours || 24} h</strong></div>
+                    <div><div class="text-xs">OSMOLARIDADE</div><strong>${this.formatValue(formulation.osmolarity, 'mOsm/L', 0)}</strong></div>
+                </div>
+                <table class="pp-table">
+                    <tr><th>Proteínas</th><td style="text-align:right">${this.formatValue(formulation.proteins?.required, 'g', 1)}</td></tr>
+                    <tr><th>Glucose</th><td style="text-align:right">${this.formatValue(formulation.glucose?.required, 'g', 1)}</td></tr>
+                    <tr><th>Lípidos</th><td style="text-align:right">${this.formatValue(formulation.lipids?.required, 'g', 1)}</td></tr>
+                    <tr><th>Energia Total</th><td style="text-align:right"><strong>${this.formatValue(energy.total, 'kcal', 0)}</strong></td></tr>
+                </table>
+                <div class="pp-divider"></div>
+                <div style="text-align:center;background:#eef2f7;border:1px solid #d6deea;border-radius:8px;padding:10px;font-weight:700;">
+                    CONSERVAR A 2-8°C<br/>PROTEGER DA LUZ
+                </div>
+                <div class="pp-footer">https://nutrisoft.local · 1/1</div>
+            </div>
+        `;
+    }
+
+    buildPreviewComponentRows(formulation) {
+        const rows = [];
+        const lots = formulation?.preparationMeta?.componentLots || {};
+        const lotByLabel = {
+            'Proteínas': lots.proteins?.lotNumber,
+            'Lípidos': lots.lipids?.lotNumber,
+            'Glucose': lots.glucose?.lotNumber,
+            'Fósforo': lots.phosphorus?.lotNumber,
+            'Sódio': lots.sodium?.lotNumber,
+            'Potássio': lots.potassium?.lotNumber,
+            'Magnésio': lots.magnesium?.lotNumber,
+            'Cálcio': lots.calcium?.lotNumber,
+            'Água Destilada': lots.water?.lotNumber
+        };
+        const push = (label, comp) => {
+            if (!comp?.volume) return;
+            rows.push({ label, solution: comp.solution || '—', lot: lotByLabel[label] || '-', volume: Number(comp.volume).toFixed(1) });
+        };
+        push('Proteínas', formulation.proteins);
+        push('Lípidos', formulation.lipids);
+        push('Glucose', formulation.glucose);
+        push('Fósforo', formulation.electrolytes?.phosphorus);
+        push('Sódio', formulation.electrolytes?.sodium);
+        push('Potássio', formulation.electrolytes?.potassium);
+        push('Magnésio', formulation.electrolytes?.magnesium);
+        push('Cálcio', formulation.electrolytes?.calcium);
+        push('Água Destilada', formulation.water);
+        return rows;
+    }
+
+    async printLabelsOnly(originalIndex = null) {
+        let details;
+        try {
+            details = this.buildPdfExportContext(originalIndex);
+            const { formulationToPrint, prepDetails, logDetails } = details;
+            AuditLogger.log('printLabelsInitiated', logDetails);
+            await this.exportLabelsPDF(formulationToPrint, prepDetails.prepNum, prepDetails.patientName, prepDetails.date, { mode: 'save' });
+        } catch (error) {
+            console.error('NutriSoft.printLabelsOnly:', error);
+            this.dataManager.displayNotification(`Erro ao gerar rótulos: ${error.message}.`, 'error');
+            AuditLogger.log('printLabelsError', { ...(details?.logDetails || {}), error: error.message, stack: error.stack });
         }
     }
     deletePrescription(originalIndex) { 
@@ -2536,7 +4152,7 @@ class NutriSoft {
     }
     setupReportsSearch() { 
         const searchInput = document.getElementById('reports-search-input'); 
-        searchInput?.addEventListener('input', () => this.filterTable('reports-list-body', searchInput.value.toLowerCase().trim(), 8)); 
+        searchInput?.addEventListener('input', () => this.filterTable('reports-list-body', searchInput.value.toLowerCase().trim(), 7)); 
     }
     filterTable(tbodyId, query, colspan) { 
         const tbody = document.getElementById(tbodyId);
@@ -2574,113 +4190,533 @@ class NutriSoft {
             }
         }
     }
-    exportPDF(formulation, preparationMap, preparationNumber, patientName, prescriptionDate) { 
+    async exportPDF(formulation, preparationMap, preparationNumber, patientName, prescriptionDate, options = { mode: 'save' }) {
+        const mode = options?.mode || 'save';
         try {
             if (!window.jspdf || !window.jspdf.jsPDF) {
-                console.error("jsPDF library is not loaded. Cannot generate PDF.");
-                this.dataManager.displayNotification("Erro: Biblioteca jsPDF não carregada.", "error");
-                return;
-            }
-            const { jsPDF } = window.jspdf;
-            const doc = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4' });
-
-            const pageWidth = doc.internal.pageSize.getWidth();
-            const pageHeight = doc.internal.pageSize.getHeight();
-            const margin = 10;
-            const usableWidth = pageWidth - 2 * margin;
-            let y = margin;
-            const lineSpacing = 5; 
-            const sectionSpacing = 8;
-
-            const addWrappedText = (text, x, currentY, options = {}) => {
-                const { fontSize = 10, fontStyle = 'normal', maxWidth = usableWidth, color = [0,0,0] } = options;
-                doc.setFontSize(fontSize);
-                doc.setFont(undefined, fontStyle);
-                doc.setTextColor(color[0], color[1], color[2]);
-
-                const lines = doc.splitTextToSize(text, maxWidth);
-                doc.text(lines, x, currentY);
-                return currentY + (lines.length * (fontSize * 0.352778 * 1.2)); 
-            };
-
-            doc.setFontSize(16); doc.setFont(undefined, 'bold');
-            doc.text('Prescrição de Nutrição Parentérica', pageWidth / 2, y, { align: 'center' });
-            y += lineSpacing * 2;
-
-            doc.setFontSize(10); doc.setFont(undefined, 'normal');
-            doc.text(`Número Preparação: ${preparationNumber}`, margin, y);
-            let displayDate = 'N/A';
-            try { displayDate = prescriptionDate ? new Date(prescriptionDate).toLocaleDateString() : new Date().toLocaleDateString(); } catch {}
-            doc.text(`Data Prescrição: ${displayDate}`, pageWidth - margin, y, { align: 'right' });
-            y += lineSpacing * 1.5;
-
-            doc.text(`Paciente: ${patientName || 'N/A'}`, margin, y);
-            doc.text(`Peso: ${formulation.patient?.weight ?? '?'} kg`, pageWidth - margin, y, { align: 'right' });
-            y += lineSpacing * 1.5;
-            doc.line(margin, y, pageWidth - margin, y); 
-            y += lineSpacing;
-
-
-            doc.setFontSize(12); doc.setFont(undefined, 'bold');
-            doc.text('Detalhes da Formulação:', margin, y);
-            y += lineSpacing;
-            const formulationDetailsText = this.formatCompositionDetailsForPDF(formulation);
-            y = addWrappedText(formulationDetailsText, margin, y, { fontSize: 9 });
-            y += sectionSpacing;
-
-            if (y > pageHeight - margin * 3) { doc.addPage(); y = margin; } 
-
-            doc.setFontSize(12); doc.setFont(undefined, 'bold');
-            doc.text('Mapa de Preparação (Ordem Sugerida):', margin, y);
-            y += lineSpacing;
-            y = addWrappedText(preparationMap, margin, y, { fontSize: 8.5, fontStyle: 'courier' }); 
-            y += sectionSpacing;
-
-            if (y > pageHeight - margin * 3) { doc.addPage(); y = margin; }
-
-            if (formulation.warnings?.length > 0) {
-                doc.setFontSize(12); doc.setFont(undefined, 'bold');
-                y = addWrappedText('Avisos da Formulação:', margin, y, { color: [255, 100, 0] }); 
-                y += lineSpacing * 0.5;
-                y = addWrappedText(formulation.warnings.map(w => `- ${w}`).join('\n'), margin, y, { fontSize: 9 });
-                y += sectionSpacing;
-                if (y > pageHeight - margin * 3) { doc.addPage(); y = margin; }
+                throw new Error('Biblioteca jsPDF não carregada.');
             }
 
-            if (formulation.errors?.length > 0) {
-                doc.setFontSize(12); doc.setFont(undefined, 'bold');
-                y = addWrappedText('ERROS CRÍTICOS:', margin, y, { color: [255, 0, 0] }); 
-                y += lineSpacing * 0.5;
-                y = addWrappedText(formulation.errors.map(e => `- ${e}`).join('\n'), margin, y, { fontSize: 9 });
-                y += sectionSpacing;
-                if (y > pageHeight - margin * 3) { doc.addPage(); y = margin; }
+            const validation = this.validatePdfPayload(formulation, preparationMap, preparationNumber);
+            if (!validation.ok) {
+                throw new Error(`Dados insuficientes para PDF: ${validation.issues.join(' | ')}`);
             }
 
-            y = Math.max(y, pageHeight - margin - 30); 
-            if (y > pageHeight - margin - 30) { 
-                 if (pageHeight - y < 30) { 
-                    doc.addPage(); y = margin;
-                 }
+            const assets = await this.preloadPdfAssets(formulation, preparationNumber, patientName, prescriptionDate);
+            const doc = this.createPdfDocument();
+
+            this.generateWorksheetPage(doc, formulation, preparationMap, preparationNumber, patientName, prescriptionDate, assets);
+            this.generateLabelsPage(doc, formulation, preparationNumber, patientName, prescriptionDate, assets, { appendPage: true });
+
+            const fileNameSafePatient = (patientName || 'doente').replace(/[^a-z0-9]/gi, '_').toLowerCase();
+            const timestamp = new Date().toISOString().split('T')[0];
+            const filename = `nutrisoft_${fileNameSafePatient}_prep${preparationNumber}_${timestamp}.pdf`;
+
+            if (mode === 'preview') {
+                const blobUrl = doc.output('bloburl');
+                window.open(blobUrl, '_blank', 'noopener');
+                this.dataManager.displayNotification('Pré-visualização PDF aberta em nova janela.', 'success');
             } else {
-                y = pageHeight - margin - 30; 
+                doc.save(filename);
+                this.dataManager.displayNotification('PDF gerado com sucesso.', 'success');
             }
-
-            doc.setFontSize(10);
-            doc.text('Prescrito por: _________________________', margin, y);
-            doc.text('Conferido por (Farm.): _________________________', pageWidth / 2, y, {align: 'left'});
-            y += lineSpacing * 2;
-            doc.text(`Data Impressão: ${new Date().toLocaleString()}`, margin, y);
-
-            const filename = `Prescricao_NP_${String(preparationNumber).replace(/\W/g, '')}_${patientName.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}.pdf`;
-            doc.save(filename);
-            console.log("PDF generated:", filename);
+            AuditLogger.log('exportPDFSuccess', { prepId: preparationNumber, mode, filename });
         } catch (error) {
-            console.error("NutriSoft.exportPDF: Erro ao gerar PDF:", error);
-            this.dataManager.displayNotification(`Erro ao gerar PDF: ${error.message}. Verifique o console.`, 'error');
-            AuditLogger.log('exportPDFError', { prepId: preparationNumber, error: error.message, stack: error.stack });
+            console.error('NutriSoft.exportPDF: Erro ao gerar PDF:', error);
+            this.dataManager.displayNotification(`Erro ao gerar PDF: ${error.message}.`, 'error');
+            AuditLogger.log('exportPDFError', { prepId: preparationNumber, mode, error: error.message, stack: error.stack });
+            throw error;
         }
     }
-    formatCompositionDetailsForPDF(formulation) { 
+
+    async exportLabelsPDF(formulation, preparationNumber, patientName, prescriptionDate, options = { mode: 'save' }) {
+        const mode = options?.mode || 'save';
+        try {
+            if (!window.jspdf || !window.jspdf.jsPDF) throw new Error('Biblioteca jsPDF não carregada.');
+            if (!formulation?.patient) throw new Error('Dados de doente/formulação insuficientes para rótulos.');
+            const assets = await this.preloadPdfAssets(formulation, preparationNumber, patientName, prescriptionDate);
+            const doc = this.createPdfDocument();
+            this.generateLabelsPage(doc, formulation, preparationNumber, patientName, prescriptionDate, assets, { appendPage: false });
+            const fileNameSafePatient = (patientName || 'doente').replace(/[^a-z0-9]/gi, '_').toLowerCase();
+            const timestamp = new Date().toISOString().split('T')[0];
+            const filename = `nutrisoft_${fileNameSafePatient}_prep${preparationNumber}_${timestamp}_labels.pdf`;
+            if (mode === 'preview') {
+                window.open(doc.output('bloburl'), '_blank', 'noopener');
+            } else {
+                doc.save(filename);
+            }
+            AuditLogger.log('exportLabelsPDFSuccess', { prepId: preparationNumber, mode, filename });
+        } catch (error) {
+            console.error('NutriSoft.exportLabelsPDF:', error);
+            this.dataManager.displayNotification(`Erro ao gerar rótulos: ${error.message}.`, 'error');
+            AuditLogger.log('exportLabelsPDFError', { prepId: preparationNumber, mode, error: error.message, stack: error.stack });
+            throw error;
+        }
+    }
+
+    createPdfDocument() {
+        const { jsPDF } = window.jspdf;
+        return new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4', compress: true });
+    }
+
+
+    isPdfDebugEnabled() {
+        try {
+            const fromStorage = localStorage.getItem('nutrisoft_pdf_debug') === '1';
+            const fromQuery = new URLSearchParams(window.location.search).get('pdfDebug') === '1';
+            return fromStorage || fromQuery;
+        } catch {
+            return false;
+        }
+    }
+
+    pdfEnsureSpace(doc, currentY, requiredHeight) {
+        const pageHeight = doc.internal.pageSize.getHeight();
+        if (currentY + requiredHeight <= pageHeight - PDF_THEME.margins.bottom) return { y: currentY, pageAdded: false };
+        doc.addPage();
+        return { y: PDF_THEME.margins.top, pageAdded: true };
+    }
+
+    pdfFitText(doc, text, x, y, maxWidth, baseSize, minSize = 6.5, style = 'normal') {
+        doc.setFont(PDF_THEME.fonts.family, style);
+        let size = baseSize;
+        while (size >= minSize) {
+            doc.setFontSize(size);
+            if (doc.getTextWidth(text) <= maxWidth) {
+                doc.text(text, x, y);
+                return size;
+            }
+            size -= 0.4;
+        }
+        doc.setFontSize(minSize);
+        doc.text(text, x, y, { maxWidth });
+        return minSize;
+    }
+
+    pdfDrawSafeArea(doc, template, startX, startY) {
+        const { safeArea } = template;
+        if (!safeArea) return;
+        doc.setDrawColor(180, 180, 180);
+        doc.setLineWidth(0.2);
+        doc.setLineDash([1, 1], 0);
+        doc.rect(startX + safeArea.x, startY + safeArea.y, safeArea.w, safeArea.h);
+        doc.setLineDash();
+    }
+
+    pdfCalibrationMarks(doc, template, startX, startY) {
+        const size = 2.5;
+        const marks = [
+            [startX, startY],
+            [startX + template.width, startY],
+            [startX, startY + template.height],
+            [startX + template.width, startY + template.height]
+        ];
+        doc.setDrawColor(120, 120, 120);
+        marks.forEach(([mx, my]) => {
+            doc.line(mx - size, my, mx + size, my);
+            doc.line(mx, my - size, mx, my + size);
+        });
+    }
+
+    pdfDrawTable(doc, startX, startY, headers, rows, widths, options = {}) {
+        const headerHeight = options.headerHeight || 7;
+        const baseRowHeight = options.rowHeight || 6;
+        const cellPadding = options.cellPadding ?? 1.5;
+        let y = startY;
+        const maxWidth = doc.internal.pageSize.getWidth() - PDF_THEME.margins.right;
+        const getLineHeight = (fontSize) => (fontSize * 0.3528) * 1.2;
+
+        const drawHeader = () => {
+            let x = startX;
+            doc.setFontSize(PDF_THEME.fonts.small);
+            doc.setFont(PDF_THEME.fonts.family, 'bold');
+            doc.setDrawColor(...PDF_THEME.palette.subtleBorder);
+            doc.setFillColor(...PDF_THEME.palette.headerFill);
+            headers.forEach((header, idx) => {
+                const width = widths[idx];
+                doc.rect(x, y, width, headerHeight, 'FD');
+                doc.text(String(header), x + cellPadding, y + headerHeight - 2);
+                x += width;
+            });
+            y += headerHeight;
+        };
+
+        const drawRow = (row) => {
+            let x = startX;
+            doc.setFont(PDF_THEME.fonts.family, options.bodyFontStyle || 'normal');
+            doc.setFontSize(PDF_THEME.fonts.small);
+            let rowHeight = baseRowHeight;
+            const rightAlignColumns = options.rightAlignColumns || [];
+            const boldColumns = options.boldColumns || [];
+            const cells = row.map((cell, idx) => {
+                const width = widths[idx];
+                const text = cell === undefined || cell === null ? '' : String(cell);
+                const wrapped = doc.splitTextToSize(text, width - (cellPadding * 2));
+                rowHeight = Math.max(rowHeight, getLineHeight(PDF_THEME.fonts.small) * wrapped.length + 2);
+                return { width, wrapped, text };
+            });
+            row.forEach((cell, idx) => {
+                const width = widths[idx];
+                const wrapped = cells[idx].wrapped;
+                doc.rect(x, y, width, rowHeight);
+                if (boldColumns.includes(idx)) {
+                    doc.setFont(PDF_THEME.fonts.family, 'bold');
+                } else {
+                    doc.setFont(PDF_THEME.fonts.family, options.bodyFontStyle || 'normal');
+                }
+                if (rightAlignColumns.includes(idx)) {
+                    doc.text(wrapped, x + width - cellPadding, y + rowHeight - 2, { maxWidth: width - (cellPadding * 2), align: 'right' });
+                } else {
+                    doc.text(wrapped, x + cellPadding, y + rowHeight - 2, { maxWidth: width - (cellPadding * 2) });
+                }
+                x += width;
+            });
+            y += rowHeight;
+        };
+
+        drawHeader();
+        rows.forEach(row => {
+            if (startX + widths.reduce((a, b) => a + b, 0) > maxWidth) {
+                console.warn('Tabela excedeu largura, ajuste de colunas necessário.');
+            }
+            const ensured = this.pdfEnsureSpace(doc, y, baseRowHeight + PDF_THEME.margins.bottom);
+            if (ensured.pageAdded) {
+                y = ensured.y;
+                drawHeader();
+            } else {
+                y = ensured.y;
+            }
+            drawRow(row);
+        });
+        return y;
+    }
+
+    generateWorksheetPage(doc, formulation, preparationMap, prepNumber, patientName, prescriptionDate, assets = {}) {
+        const margin = PDF_THEME.margins.left;
+        const usableWidth = doc.internal.pageSize.getWidth() - PDF_THEME.margins.left - PDF_THEME.margins.right;
+        let y = PDF_THEME.margins.top;
+        const patient = formulation.patient || {};
+        const energy = formulation.energy || {};
+        const weight = Number(patient.weight) || 0;
+        const headerText = 'Ficha de Preparação Farmacêutica';
+        const pdfDebug = this.isPdfDebugEnabled();
+
+        const safeDate = (() => {
+            try {
+                const d = prescriptionDate ? new Date(prescriptionDate) : new Date();
+                return `${d.toLocaleDateString()} ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+            } catch (err) {
+                console.warn('Erro a formatar data da prescrição', err);
+                return 'N/A';
+            }
+        })();
+
+        if (assets.logoDataUrl) {
+            try {
+                doc.addImage(assets.logoDataUrl, 'PNG', PDF_THEME.margins.left, y - 4, 26, 12);
+            } catch (err) {
+                console.warn('Logótipo não carregado no PDF', err);
+            }
+        }
+
+        doc.setFont(PDF_THEME.fonts.family, 'bold');
+        doc.setFontSize(PDF_THEME.fonts.title);
+        doc.text('NutriSoft · Nutrição Parentérica', doc.internal.pageSize.getWidth() / 2, y + 2, { align: 'center' });
+        doc.setFontSize(PDF_THEME.fonts.section);
+        doc.text(headerText, doc.internal.pageSize.getWidth() / 2, y + 8, { align: 'center' });
+        y += 14;
+
+        const headerBoxHeight = 36;
+        if (pdfDebug) {
+            doc.setDrawColor(200, 90, 90);
+            doc.rect(PDF_THEME.margins.left, PDF_THEME.margins.top, doc.internal.pageSize.getWidth() - PDF_THEME.margins.left - PDF_THEME.margins.right, doc.internal.pageSize.getHeight() - PDF_THEME.margins.top - PDF_THEME.margins.bottom);
+        }
+        doc.setDrawColor(...PDF_THEME.palette.border);
+        doc.rect(margin, y, usableWidth * 0.68, headerBoxHeight);
+        doc.setFont(PDF_THEME.fonts.family, 'normal');
+        doc.setFontSize(PDF_THEME.fonts.base);
+        const headerLines = [
+            [`#Prep: ${prepNumber}`, `Data: ${safeDate}`],
+            [`Paciente: ${patientName || '---'}`, `Processo: ${patient.processNumber || patient.admissionNumber || '---'}`],
+            [`Condição: ${patient.condition || '---'}`, `Médico: ${patient.physician || '---'}`],
+            [`Peso: ${this.formatValue(patient.weight, 'kg', 1)}`, `Via: ${routeLabel(formulation.route)}`]
+        ];
+        let infoY = y + 6;
+        headerLines.forEach(line => {
+            doc.text(line[0], margin + 3, infoY);
+            doc.text(line[1], margin + usableWidth * 0.35, infoY);
+            infoY += 7;
+        });
+
+        const barcodeBoxX = margin + usableWidth * 0.7;
+        const barcodeBoxW = usableWidth * 0.3;
+        doc.setDrawColor(...PDF_THEME.palette.subtleBorder);
+        doc.rect(barcodeBoxX, y, barcodeBoxW, headerBoxHeight);
+        doc.setFontSize(PDF_THEME.fonts.small);
+        doc.setFont(PDF_THEME.fonts.family, 'italic');
+        doc.text('Código/QR da Preparação', barcodeBoxX + barcodeBoxW / 2, y + headerBoxHeight / 2, { align: 'center' });
+        y += headerBoxHeight + 6;
+
+        const proteins = formulation.proteins || {};
+        const glucose = formulation.glucose || {};
+        const lipids = formulation.lipids || {};
+        const macroRows = [
+            [
+                'Aminoácidos',
+                this.formatValue(proteins.required, 'g', 1),
+                weight > 0 ? `${(proteins.required / weight).toFixed(2)} g/kg` : '---',
+                this.formatValue(energy.proteins, 'kcal', 0),
+                `N: ${this.formatValue(proteins.nitrogen, 'g', 2)}`
+            ],
+            [
+                'Glucose',
+                this.formatValue(glucose.required, 'g', 1),
+                weight > 0 ? `${(glucose.required / weight).toFixed(2)} g/kg` : '---',
+                this.formatValue(energy.glucose, 'kcal', 0),
+                `GIR: ${energy.GIR ? energy.GIR.toFixed(2) : '---'} mg/kg/min`
+            ],
+            [
+                'Lípidos',
+                this.formatValue(lipids.required, 'g', 1),
+                weight > 0 ? `${(lipids.required / weight).toFixed(2)} g/kg` : '---',
+                this.formatValue(energy.lipids, 'kcal', 0),
+                ''
+            ],
+            [
+                'Energia Total',
+                this.formatValue(energy.total, 'kcal', 0),
+                weight > 0 ? `${energy.perKg.toFixed(1)} kcal/kg` : '---',
+                '',
+                `Glucose %: ${energy.glucosePercent ? energy.glucosePercent.toFixed(1) : '---'}%`
+            ]
+        ];
+
+        doc.setFont(PDF_THEME.fonts.family, 'bold');
+        doc.setFontSize(PDF_THEME.fonts.section);
+        doc.text('Macronutrientes e Energia', margin, y - 2);
+        y = this.pdfDrawTable(doc, margin, y, ['Componente', 'Dose', 'Dose/kg', 'Energia', 'Notas'], macroRows, [40, 30, 30, 30, usableWidth - 130]);
+        y += 4;
+
+        const componentRows = [];
+        const pushRow = (label, component, options = {}) => {
+            if (!component) return;
+            const doseKey = options.doseKey || 'required';
+            const volumeKey = options.volumeKey || 'volume';
+            const dose = component[doseKey];
+            const volume = component[volumeKey];
+            const hasDose = Number.isFinite(dose) && dose !== 0;
+            const hasVolume = Number.isFinite(volume) && volume !== 0;
+            if (!hasDose && !hasVolume && !component.error) return;
+            const doseUnit = options.doseUnit || '';
+            const volumeUnit = options.volumeUnit || 'ml';
+            const noteParts = [];
+            if (component.recommended !== undefined && component.recommended !== null && doseKey !== 'volume') {
+                if (Number.isFinite(component.recommended) && component.recommended > 0 && component.recommended !== dose) {
+                    noteParts.push(`Alvo ${this.formatValue(component.recommended, doseUnit, 2)}`);
+                }
+            }
+            if (component.source) noteParts.push(component.source === 'direct' ? 'Prescrito' : 'Calculado');
+            if (component.fromPhosphorus && label.startsWith('Sódio')) {
+                noteParts.push(`${this.formatValue(component.fromPhosphorus, 'mEq', 2)} do Fosfato`);
+            }
+            const lotsByComponent = formulation.preparationMeta?.componentLots || {};
+            const lotLookup = {
+                'Aminoácidos': lotsByComponent.proteins,
+                'Glucose': lotsByComponent.glucose,
+                'Lípidos': lotsByComponent.lipids,
+                'Sódio (Total)': lotsByComponent.sodium,
+                'Potássio': lotsByComponent.potassium,
+                'Cálcio': lotsByComponent.calcium
+            };
+            const lotInfo = lotLookup[label];
+            if (lotInfo?.lotNumber) noteParts.push(`Lote ${lotInfo.lotNumber}`);
+            if (component.error) noteParts.push(`⚠ ${component.error}`);
+            const presentation = component.solution && this.solutions?.[component.solution]
+                ? this.getSolutionConcentrationSummary(component.solution)
+                : (component.solution || '---');
+            componentRows.push([
+                options.order || String(componentRows.length + 1),
+                label,
+                presentation,
+                lotInfo?.lotNumber || '—',
+                lotInfo?.expiry || '—',
+                this.formatValue(dose, doseUnit, options.doseDp ?? 2),
+                this.formatValue(volume, volumeUnit, options.volumeDp ?? 1),
+                noteParts.join(' · '),
+                '☐'
+            ]);
+        };
+
+        pushRow('Aminoácidos', proteins, { doseUnit: 'g', doseDp: 1, order: 1 });
+        if (formulation.glutamine?.volume > 0) {
+            pushRow('Glutamina (Dipeptídeo)', formulation.glutamine, { doseKey: 'required_g_dipeptide', doseUnit: 'g', doseDp: 2, order: componentRows.length + 1 });
+        }
+        pushRow('Glucose', glucose, { doseUnit: 'g', doseDp: 1, order: componentRows.length + 1 });
+        pushRow('Lípidos', lipids, { doseUnit: 'g', doseDp: 1, order: componentRows.length + 1 });
+        const sodium = formulation.electrolytes?.sodium;
+        pushRow('Sódio (Total)', sodium, { doseKey: 'displayRequired', doseUnit: 'mEq', order: componentRows.length + 1 });
+        pushRow('Potássio', formulation.electrolytes?.potassium, { doseUnit: 'mEq', order: componentRows.length + 1 });
+        pushRow('Magnésio', formulation.electrolytes?.magnesium, { doseUnit: 'mEq', order: componentRows.length + 1 });
+        pushRow('Cálcio', formulation.electrolytes?.calcium, { doseUnit: 'mEq', order: componentRows.length + 1 });
+        pushRow('Fósforo', formulation.electrolytes?.phosphorus, { doseUnit: 'mmol', order: componentRows.length + 1 });
+        pushRow('Oligoelementos', formulation.additives?.oligoelements, { doseKey: 'volume', doseUnit: 'ml', order: componentRows.length + 1 });
+        pushRow('Vit. Hidrossolúveis', formulation.additives?.water_soluble_vitamins, { doseKey: 'volume', doseUnit: 'ml', order: componentRows.length + 1 });
+        pushRow('Vit. Lipossolúveis', formulation.additives?.fat_soluble_vitamins, { doseKey: 'volume', doseUnit: 'ml', order: componentRows.length + 1 });
+        if (formulation.additives?.insulin?.required > 0) {
+            pushRow('Insulina', formulation.additives.insulin, { doseUnit: 'UI', volumeDp: 3, order: componentRows.length + 1 });
+        }
+        if (formulation.additives?.heparin?.required > 0) {
+            pushRow('Heparina', formulation.additives.heparin, { doseUnit: 'UI', volumeDp: 3, order: componentRows.length + 1 });
+        }
+        if (formulation.additives?.carnitine?.required > 0) {
+            pushRow('Carnitina', formulation.additives.carnitine, { doseUnit: 'mg', order: componentRows.length + 1 });
+        }
+        pushRow('Água Estéril', formulation.water, { doseKey: 'volume', doseUnit: 'ml', order: componentRows.length + 1 });
+
+        doc.setFont(PDF_THEME.fonts.family, 'bold');
+        doc.setFontSize(11);
+        doc.text('Mapa Principal de Preparação (execução)', margin, y - 2);
+        y = this.pdfDrawTable(
+            doc,
+            margin,
+            y,
+            ['Ordem', 'Componente', 'Apresentação/Concentração', 'Lote', 'Validade', 'Dose', 'Volume (ml)', 'Observações', 'Check'],
+            componentRows,
+            [14, 30, 34, 20, 20, 16, 20, 28, 8],
+            { rowHeight: 7, headerHeight: 8, rightAlignColumns: [0, 5, 6], boldColumns: [1, 6] }
+        );
+        y += 4;
+
+        const properties = [
+            ['Volume Total', this.formatValue(formulation.volume, 'ml', 0)],
+            ['Osmolaridade', this.formatValue(formulation.osmolarity, 'mOsm/L', 0)],
+            ['Energia/kg', weight > 0 ? `${energy.perKg.toFixed(1)} kcal/kg` : '---'],
+            ['GIR', energy.GIR ? `${energy.GIR.toFixed(2)} mg/kg/min` : '---'],
+            ['Glucose %', energy.glucosePercent ? `${energy.glucosePercent.toFixed(1)}%` : '---'],
+            ['Perfusão', `${formulation.infusionHours || 24} h`]
+        ];
+
+        const propWidth = (usableWidth - 4) / 2;
+        doc.setFont(PDF_THEME.fonts.family, 'bold');
+        doc.setFontSize(PDF_THEME.fonts.section);
+        doc.text('Propriedades da Administração', margin, y - 2);
+        doc.setFont(PDF_THEME.fonts.family, 'normal');
+        doc.setFontSize(PDF_THEME.fonts.small);
+        let propY = y;
+        properties.forEach((row, idx) => {
+            const x = margin + (idx % 2) * (propWidth + 4);
+            const currentY = propY + Math.floor(idx / 2) * 7;
+            doc.rect(x, currentY, propWidth, 7);
+            doc.text(`${row[0]}: ${row[1]}`, x + 2, currentY + 4.5);
+        });
+        y = propY + Math.ceil(properties.length / 2) * 7 + 8;
+
+        const prepMeta = formulation.preparationMeta || {};
+        const qualityRows = [
+            ['Lote Interno', prepMeta.batch || '—'],
+            ['Preparador', prepMeta.preparer || '—'],
+            ['Conferente', prepMeta.checker || '—'],
+            ['BUD', `${parseNum(prepMeta.budHours, 24)} h`],
+            ['Conservação', prepMeta.storage || 'Conservar 2–8°C.'],
+            ['Fotoproteção', prepMeta.photoprotection ? 'Sim' : 'Não']
+        ];
+        doc.setFont(PDF_THEME.fonts.family, 'bold');
+        doc.setFontSize(PDF_THEME.fonts.section);
+        doc.text('Controlo e Rastreabilidade', margin, y - 2);
+        y = this.pdfDrawTable(doc, margin, y, ['Campo', 'Valor'], qualityRows, [45, usableWidth - 45], { rowHeight: 7 });
+        y += 4;
+
+        if (preparationMap) {
+            const ensured = this.pdfEnsureSpace(doc, y, 30);
+            y = ensured.y;
+            if (ensured.pageAdded) {
+                doc.setFont(PDF_THEME.fonts.family, 'bold');
+                doc.setFontSize(PDF_THEME.fonts.section);
+                doc.text(headerText, margin, y - 4);
+            }
+            doc.setFont(PDF_THEME.fonts.family, 'bold');
+            doc.setFontSize(PDF_THEME.fonts.section);
+            doc.text('Mapa de Preparação (Ordem de Aditivos)', margin, y);
+            y += 4;
+            doc.setFont(PDF_THEME.fonts.family, 'normal');
+            doc.setFontSize(PDF_THEME.fonts.small);
+            const prepLines = doc.splitTextToSize(preparationMap, usableWidth);
+            prepLines.forEach(line => {
+                doc.text(line, margin, y);
+                y += 4;
+            });
+        }
+
+        const drawStackedBox = (title, items, color) => {
+            if (!items || !items.length) return;
+            const ensured = this.pdfEnsureSpace(doc, y, 14 + items.length * 4);
+            y = ensured.y;
+            if (ensured.pageAdded) {
+                doc.setFont(PDF_THEME.fonts.family, 'bold');
+                doc.setFontSize(PDF_THEME.fonts.section);
+                doc.text(headerText, margin, y - 4);
+            }
+            doc.setFont(PDF_THEME.fonts.family, 'bold');
+            doc.setFontSize(PDF_THEME.fonts.section);
+            doc.setFillColor(...color);
+            doc.rect(margin, y, usableWidth, 8, 'F');
+            doc.setTextColor(0, 0, 0);
+            doc.text(title, margin + 2, y + 5);
+            y += 10;
+            doc.setFont(PDF_THEME.fonts.family, 'normal');
+            doc.setFontSize(PDF_THEME.fonts.small);
+            items.forEach(msg => {
+                doc.text(`• ${msg}`, margin + 2, y, { maxWidth: usableWidth - 4 });
+                y += 4;
+            });
+            y += 2;
+        };
+
+        drawStackedBox('Avisos de Formulação', formulation.warnings || [], PDF_THEME.palette.warning);
+        drawStackedBox('Erros Críticos', formulation.errors || [], PDF_THEME.palette.error);
+
+        const checkRows = [
+            ['Integridade da bolsa', '☐ Conforme'],
+            ['Partículas / turvação', '☐ Ausentes'],
+            ['Volume final confirmado', '☐ Sim'],
+            ['Fotoproteção aplicada', formulation.preparationMeta?.photoprotection ? '☐ Sim' : '☐ N/A'],
+            ['Conservação correta', '☐ Sim']
+        ];
+        const ensuredChecks = this.pdfEnsureSpace(doc, y, 22);
+        y = ensuredChecks.y;
+        if (ensuredChecks.pageAdded) {
+            doc.setFont(PDF_THEME.fonts.family, 'bold');
+            doc.setFontSize(PDF_THEME.fonts.section);
+            doc.text(headerText, margin, y - 4);
+        }
+        doc.setFont(PDF_THEME.fonts.family, 'bold');
+        doc.setFontSize(PDF_THEME.fonts.section);
+        doc.text('Conferência final em câmara', margin, y);
+        y += 2;
+        y = this.pdfDrawTable(doc, margin, y, ['Item', 'Confirmação'], checkRows, [usableWidth * 0.72, usableWidth * 0.28], { rowHeight: 7 });
+        y += 4;
+
+        const ensuredSign = this.pdfEnsureSpace(doc, y, 22);
+        y = ensuredSign.y;
+        if (ensuredSign.pageAdded) {
+            doc.setFont(PDF_THEME.fonts.family, 'bold');
+            doc.setFontSize(PDF_THEME.fonts.section);
+            doc.text(headerText, margin, y - 4);
+        }
+        doc.setFont(PDF_THEME.fonts.family, 'italic');
+        doc.setFontSize(PDF_THEME.fonts.small);
+        doc.text('Preparado por: ___________________________', margin, y);
+        doc.text('Conferido por: ___________________________', margin + usableWidth / 2, y);
+        y += 6;
+        doc.text('Data/Hora de Revisão: ___________________________', margin, y);
+        y += 6;
+        doc.text('Observações/Desvios: _________________________________________________________________', margin, y);
+        y += 6;
+        doc.text(`Software NutriSoft · versão local · Hash prescrição: ${formulation.hash || '—'}`, margin, y);
+    }
+
+
+    formatCompositionDetailsForPDF(formulation) {
         const details = [];
         const formatLine = (label, component, valueKey = 'volume', unit = 'ml', dp = 2) => {
              if (!component || component[valueKey] === undefined || component[valueKey] === null || (component[valueKey] === 0 && (label.toLowerCase().includes('volume') || unit ==='ml'))) return null;
@@ -2692,7 +4728,7 @@ class NutriSoft {
         };
 
         details.push(`- Volume Total Prescrito: ${this.formatValue(formulation.volume, 'ml', 0)}`);
-        details.push(`- Via de Administração: ${formulation.route === 'peripheral' ? 'Periférica' : 'Central'}`);
+        details.push(`- Via de Administração: ${routeLabel(formulation.route)}`);
         details.push(`- Osmolaridade Calculada: ${this.formatValue(formulation.osmolarity, 'mOsm/L', 0)}`);
         details.push(''); 
 
@@ -2713,8 +4749,12 @@ class NutriSoft {
         Object.entries(formulation.electrolytes ?? {}).forEach(([key, comp]) => {
             const name = key.charAt(0).toUpperCase() + key.slice(1);
             const unit = (key === 'phosphorus') ? 'mmol' : 'mEq';
-            const line1 = formatLine(`${name} (total)`, comp, 'required', unit);
+            const valueKey = key === 'sodium' ? 'displayRequired' : 'required';
+            const line1 = formatLine(`${name} (total)`, comp, valueKey, unit);
             if (line1) details.push(line1);
+            if (key === 'sodium' && comp.fromPhosphorus) {
+                details.push(`   ↳ ${this.formatValue(comp.fromPhosphorus, 'mEq', 2)} do Fosfato`);
+            }
             const line2 = formatLine(`  ↳ Volume ${name}`, comp, 'volume', 'ml');
             if (line2) details.push(line2);
         });
@@ -2742,58 +4782,185 @@ class NutriSoft {
 
         return details.filter(line => line !== null).join('\n');
     }
-    addLabelContent(doc, formulation, startX, startY, isLipidsLabel, preparationNumber, patientName, prescriptionDate) { 
-        const labelWidth = 90; const labelHeight = 50; const padding = 5;
-        const textStartX = startX + padding;
-        let currentY = startY + padding;
-        const lineSpacingLabel = 4; 
-
-        doc.setDrawColor(0); doc.rect(startX, startY, labelWidth, labelHeight); 
-
-        doc.setFontSize(8); doc.setFont(undefined, 'italic');
-        doc.text('<<ULSSM - SG TF>>', textStartX, currentY); currentY += lineSpacingLabel * 0.8;
-
-        doc.setFontSize(11); doc.setFont(undefined, 'bold');
-        doc.text(`#Prep: ${preparationNumber}`, textStartX, currentY); currentY += lineSpacingLabel * 1.1;
-
-        const maxNameWidthChars = 35; 
-        const displayName = patientName.length > maxNameWidthChars ? patientName.substring(0, maxNameWidthChars) + "..." : patientName;
-        doc.text(`Paciente: ${displayName}`, textStartX, currentY); currentY += lineSpacingLabel * 1.1;
-
-        doc.setFontSize(9); doc.setFont(undefined, 'bold');
-        let bagType = 'BOLSA ÚNICA (3-em-1)';
-        if (isLipidsLabel) { bagType = 'BOLSA DE LÍPIDOS (B)'; doc.setTextColor(0,100,0); } 
-        else if (formulation.patient?.weight < 5 || formulation.patient?.condition === 'neonate') { 
-            bagType = 'BOLSA AQUOSA (A)'; doc.setTextColor(0,0,139); 
-        }
-        doc.text(bagType, textStartX, currentY);
-        doc.setTextColor(0,0,0); 
-        currentY += lineSpacingLabel;
-
-        doc.setFontSize(8); doc.setFont(undefined, 'normal');
-        let dDate = 'N/A', dTime = 'N/A';
-        try{
-            const d = prescriptionDate ? new Date(prescriptionDate) : new Date();
-            if(!isNaN(d.getTime())){
-                dDate=d.toLocaleDateString();
-                dTime=d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+    generateLabelsPage(doc, formulation, prepNum, patientName, prescriptionDate, assets = {}, options = {}) {
+        const template = LABEL_TEMPLATES.main;
+        const isTwoBags = (formulation.patient?.weight < 5 && formulation.patient?.condition === 'pediatric') || (formulation.patient?.condition === 'neonate');
+        const labels = isTwoBags ? [false, false, true, true] : [false, false, false, false];
+        const appendPage = options?.appendPage !== false;
+        if (appendPage) doc.addPage();
+        labels.forEach((isLipids, idx) => {
+            if (idx > 0 && idx % 4 === 0) doc.addPage();
+            const col = idx % 2;
+            const row = Math.floor((idx % 4) / 2);
+            const x = template.pageMarginX + col * (template.width + template.gapX);
+            const y = template.pageMarginY + row * (template.height + template.gapY);
+            try {
+                this.addLabelContent(doc, formulation, x, y, isLipids, prepNum, patientName, prescriptionDate, template, assets);
+            } catch (labelError) {
+                console.error('Erro ao renderizar rótulo:', labelError);
+                doc.setDrawColor(...PDF_THEME.palette.border);
+                doc.rect(x, y, template.width, template.height);
+                doc.setFont(PDF_THEME.fonts.family, 'bold');
+                doc.setFontSize(9);
+                doc.text(`Erro no rótulo #${idx + 1}`, x + 4, y + 8);
+                doc.setFont(PDF_THEME.fonts.family, 'normal');
+                doc.setFontSize(7);
+                doc.text(String(labelError?.message || 'Falha inesperada no layout.'), x + 4, y + 13, { maxWidth: template.width - 8 });
             }
-        }catch{}
-        doc.text(`Data Prep.: ${dDate}  Hora: ${dTime}`, textStartX, currentY); currentY += lineSpacingLabel;
+        });
+        doc.setFont(PDF_THEME.fonts.family, 'italic');
+        doc.setFontSize(7);
+        doc.text('Imprimir a 100% · Validar recorte · Sem fit-to-page', PDF_THEME.margins.left, doc.internal.pageSize.getHeight() - 6);
+    }
+    addLabelContent(doc, formulation, startX, startY, isLipidsLabel, preparationNumber, patientName, prescriptionDate, template = LABEL_TEMPLATES.main, assets = {}) {
+        const safeArea = template.safeArea || { x: 2, y: 2, w: template.width - 4, h: template.height - 4 };
+        const safeStartX = startX + safeArea.x;
+        const safeStartY = startY + safeArea.y;
+        const safeWidth = safeArea.w;
+        const safeHeight = safeArea.h;
+        const padding = 1.6;
+        const lineHeight = (fontSize) => (fontSize * 0.3528) * 1.12;
+        const pdfDebug = this.isPdfDebugEnabled();
 
+        doc.setDrawColor(...PDF_THEME.palette.border);
+        doc.setLineWidth(0.35);
+        doc.rect(startX, startY, template.width, template.height);
+        this.pdfDrawSafeArea(doc, template, startX, startY);
+        this.pdfCalibrationMarks(doc, template, startX, startY);
+        if (pdfDebug) {
+            doc.setDrawColor(255, 0, 0);
+            doc.rect(safeStartX, safeStartY, safeWidth, safeHeight);
+        }
+
+        const qrBox = { w: 17, h: 12 };
+        const rightBandW = 16;
+        const leftX = safeStartX + padding;
+        const leftW = safeWidth - rightBandW - padding * 3;
+        const rightX = safeStartX + safeWidth - rightBandW - padding;
+        const splitY = safeStartY + safeHeight - qrBox.h - 4.2;
+
+        doc.setFont(PDF_THEME.fonts.family, 'italic');
+        doc.setFontSize(7.5);
+        doc.text('ULSSM · Serviços Farmacêuticos', leftX, safeStartY + padding + lineHeight(7.5));
+
+        doc.setFont(PDF_THEME.fonts.family, 'bold');
+        this.pdfFitText(doc, `#Prep ${preparationNumber}`, leftX, safeStartY + 8.5, leftW, 12, 8.2, 'bold');
+
+        let bagType = 'BOLSA ÚNICA (3-em-1)';
+        if (isLipidsLabel) bagType = 'BOLSA LÍPIDOS (B)';
+        else if (formulation.patient?.weight < 5 || formulation.patient?.condition === 'neonate') bagType = 'BOLSA AQUOSA (A)';
+
+        const patientDisplay = patientName || 'Doente';
+        const secondaryId = formulation.patient?.idNumber || formulation.patient?.processNumber || formulation.patient?.admissionNumber || '—';
+        doc.setFont(PDF_THEME.fonts.family, 'bold');
+        this.pdfFitText(doc, `Doente: ${patientDisplay}`, leftX, safeStartY + 12.8, leftW, 8.6, 7.5, 'bold');
+        doc.setFont(PDF_THEME.fonts.family, 'normal');
+        const serviceDisplay = formulation.patient?.service ? `Serviço: ${formulation.patient.service}` : 'Serviço: N/D';
+        this.pdfFitText(doc, serviceDisplay, leftX, safeStartY + 16.2, leftW, 7.4, 7.0, 'normal');
+        this.pdfFitText(doc, `ID: ${secondaryId}`, leftX, safeStartY + 18.6, leftW, 7.2, 6.8, 'normal');
+
+        doc.setDrawColor(...PDF_THEME.palette.subtleBorder);
+        doc.line(leftX, safeStartY + 19.5, leftX + leftW, safeStartY + 19.5);
+
+        doc.setFont(PDF_THEME.fonts.family, 'bold');
+        this.pdfFitText(doc, bagType, leftX, safeStartY + 23.0, leftW, 8.2, 7.2, 'bold');
+
+        const dt = prescriptionDate ? new Date(prescriptionDate) : new Date();
+        const dtDate = Number.isNaN(dt.getTime()) ? 'N/D' : dt.toLocaleDateString('pt-PT');
+        const dtTime = Number.isNaN(dt.getTime()) ? 'N/D' : dt.toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' });
         let bagVol = formulation.volume;
         if (formulation.patient?.weight < 5 || formulation.patient?.condition === 'neonate') {
-            const lipidVol = (formulation.lipids?.volume??0) + (formulation.additives?.fat_soluble_vitamins?.volume??0);
-            bagVol = isLipidsLabel ? lipidVol : formulation.volume - lipidVol;
+            const lipidVol = (formulation.lipids?.volume ?? 0) + (formulation.additives?.fat_soluble_vitamins?.volume ?? 0);
+            bagVol = isLipidsLabel ? lipidVol : Math.max(0, formulation.volume - lipidVol);
         }
-        doc.text(`Volume: ${this.formatValue(bagVol, 'ml', 0)}`, textStartX, currentY); currentY += lineSpacingLabel;
-        doc.text(`Validade: (Definir conforme protocolo)`, textStartX, currentY); currentY += lineSpacingLabel;
 
+        const infusion = formulation.infusionRate ? `${formulation.infusionRate.toFixed(1)} ml/h` : 'N/D';
+        const osm = Number.isFinite(formulation.osmolarity) ? `${formulation.osmolarity.toFixed(0)} mOsm/L` : 'estimado';
+        const metaRows = [
+            ['Data', `${dtDate} ${dtTime}`],
+            ['Volume', `${this.formatValue(bagVol, 'ml', 0)}`],
+            ['Via', `${routeLabel(formulation.route || formulation.administrationRoute)}`],
+            ['Infusão', infusion],
+            ['Osm', osm]
+        ];
 
-        doc.setFontSize(7); doc.setFont(undefined, 'italic');
-        doc.text('Conservar refrigerado. Proteger da luz.', textStartX, currentY);
-        doc.rect(startX + labelWidth - padding - 20, startY + labelHeight - padding - 15, 18, 13); 
-        doc.text('[QR/BC]', startX + labelWidth - padding - 18, startY + labelHeight - padding - 5, {align: 'left'});
+        let y = safeStartY + 25.4;
+        doc.setFontSize(7.1);
+        doc.setFont(PDF_THEME.fonts.family, 'normal');
+        metaRows.forEach(([k, v]) => {
+            if (y > splitY - 7) return;
+            doc.setFont(PDF_THEME.fonts.family, 'bold');
+            doc.text(`${k}:`, leftX, y);
+            doc.setFont(PDF_THEME.fonts.family, 'normal');
+            doc.text(String(v), leftX + 12.2, y, { maxWidth: leftW - 13 });
+            y += lineHeight(7.1);
+        });
+
+        const prepMeta = formulation.preparationMeta || {};
+        const nutrientRows = [
+            ['Azoto', this.formatValue(formulation.proteins?.required ?? 0, 'g', 2)],
+            ['Glicose', this.formatValue(formulation.glucose?.required ?? 0, 'g', 1)],
+            ['Sódio', this.formatValue(formulation.electrolytes?.sodium?.displayRequired ?? 0, 'mEq', 1)],
+            ['Prep', preparationNumber || '—'],
+            ['Cal. Totais', this.formatValue(formulation.energy?.total ?? 0, 'kcal', 0)]
+        ];
+
+        const tableTop = y + 0.6;
+        const tableBottom = splitY - 0.9;
+        if (tableBottom - tableTop > 6) {
+            doc.setDrawColor(...PDF_THEME.palette.border);
+            doc.rect(leftX, tableTop, leftW, tableBottom - tableTop);
+            doc.line(leftX + leftW * 0.62, tableTop, leftX + leftW * 0.62, tableBottom);
+            let rowY = tableTop + 2.8;
+            const rowStep = Math.max(2.8, (tableBottom - tableTop - 1.5) / nutrientRows.length);
+            nutrientRows.forEach(([label, value], idx) => {
+                if (idx > 0) doc.line(leftX, rowY - 1.8, leftX + leftW, rowY - 1.8);
+                doc.setFont(PDF_THEME.fonts.family, 'bold');
+                doc.setFontSize(7.2);
+                doc.text(label, leftX + 1.1, rowY);
+                doc.setFont(PDF_THEME.fonts.family, 'normal');
+                doc.text(value, leftX + leftW - 1.2, rowY, { align: 'right' });
+                rowY += rowStep;
+            });
+        }
+
+        doc.setDrawColor(...PDF_THEME.palette.border);
+        doc.rect(rightX, safeStartY + padding, rightBandW, splitY - safeStartY - padding * 1.2);
+        doc.setFont(PDF_THEME.fonts.family, 'bold');
+        doc.setFontSize(8.6);
+        const lightProtectCenterY = safeStartY + (splitY - safeStartY) / 2;
+        if (prepMeta.photoprotection) {
+            doc.text('PROTEGER', rightX + rightBandW / 2, lightProtectCenterY - 1.2, { align: 'center' });
+            doc.text('DA LUZ', rightX + rightBandW / 2, lightProtectCenterY + 2.8, { align: 'center' });
+        } else {
+            doc.text('USO', rightX + rightBandW / 2, lightProtectCenterY - 1.2, { align: 'center' });
+            doc.text('IV', rightX + rightBandW / 2, lightProtectCenterY + 2.8, { align: 'center' });
+        }
+
+        doc.rect(rightX, splitY + 0.5, qrBox.w, qrBox.h);
+        if (assets.qrDataUrl) {
+            try {
+                doc.addImage(assets.qrDataUrl, 'PNG', rightX + 0.6, splitY + 1.1, qrBox.w - 1.2, qrBox.h - 1.8);
+            } catch (qrErr) {
+                doc.setFontSize(6.8);
+                doc.setFont(PDF_THEME.fonts.family, 'italic');
+                doc.text('[QR]', rightX + 4.2, splitY + qrBox.h - 2);
+            }
+        } else {
+            doc.setFontSize(6.8);
+            doc.setFont(PDF_THEME.fonts.family, 'italic');
+            doc.text('[QR indisponível]', rightX + 0.8, splitY + qrBox.h - 1.8);
+        }
+
+        doc.setDrawColor(...PDF_THEME.palette.subtleBorder);
+        doc.line(leftX, splitY, leftX + leftW, splitY);
+        doc.setFont(PDF_THEME.fonts.family, 'italic');
+        doc.setFontSize(6.5);
+        doc.text('Ass. Preparador: ___________  Ass. Revisor: ___________', leftX, splitY + 3.3, { maxWidth: leftW });
+        const storageLine = prepMeta.storage || 'Conservar 2–8°C · Uso IV';
+        const budHours = parseNum(prepMeta.budHours, 24);
+        doc.text(`${storageLine} · BUD ${budHours} h`, leftX, splitY + 6.2, { maxWidth: leftW });
+        doc.text('NÃO ADICIONAR NADA À BOLSA', leftX, splitY + 8.9, { maxWidth: leftW });
     }
     showAuditLogsModal() { 
         const modal = document.getElementById('audit-logs-modal');
@@ -2882,13 +5049,35 @@ class NutriSoft {
             return;
         }
         const stats = this.getPerformanceStats();
+        const total = this.prescriptions.length;
+        const byStatus = {
+            Pendente: this.prescriptions.filter(p => (p.productionStatus || 'Pendente') === 'Pendente').length,
+            Aprovada: this.prescriptions.filter(p => p.productionStatus === 'Aprovada').length,
+            Produzida: this.prescriptions.filter(p => p.productionStatus === 'Produzida').length,
+            Rejeitada: this.prescriptions.filter(p => p.productionStatus === 'Rejeitada').length
+        };
+        const volumeTotal = this.prescriptions.reduce((sum, p) => sum + (parseNum(p.volume, 0) || 0), 0);
+        const volumeMedio = total ? volumeTotal / total : 0;
         container.innerHTML = `
-            <p><strong>Doentes Adicionados:</strong> ${stats.addedPatients}</p>
-            <p><strong>Doentes Editados:</strong> ${stats.editedPatients}</p>
-            <p><strong>Doentes Excluídos:</strong> ${stats.deletedPatients}</p>
-            <p><strong>Prescrições Novas:</strong> ${stats.newPrescriptions}</p>
-            <p><strong>Prescrições Editadas:</strong> ${stats.editedPrescriptions}</p>
-            <p><strong>Prescrições Excluídas:</strong> ${stats.deletedPrescriptions}</p>
+            <div class="grid grid-cols-2 md:grid-cols-5 gap-3">
+                <div class="metric-card"><span class="metric-label">Total</span><span class="metric-value">${total}</span></div>
+                <div class="metric-card"><span class="metric-label">Pendentes</span><span class="metric-value">${byStatus.Pendente}</span></div>
+                <div class="metric-card"><span class="metric-label">Aprovadas</span><span class="metric-value">${byStatus.Aprovada}</span></div>
+                <div class="metric-card"><span class="metric-label">Produzidas</span><span class="metric-value">${byStatus.Produzida}</span></div>
+                <div class="metric-card"><span class="metric-label">Rejeitadas</span><span class="metric-value">${byStatus.Rejeitada}</span></div>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mt-4">
+                <div class="metric-card"><span class="metric-label">Volume Total Prescrito</span><span class="metric-value">${this.formatValue(volumeTotal, 'mL', 0)}</span></div>
+                <div class="metric-card"><span class="metric-label">Volume Médio/Bolsa</span><span class="metric-value">${this.formatValue(volumeMedio, 'mL', 0)}</span></div>
+                <div class="metric-card"><span class="metric-label">Doentes Registados</span><span class="metric-value">${this.patients.length}</span></div>
+            </div>
+            <div class="flex gap-2 mt-4">
+                <button type="button" class="btn-secondary" id="export-indicators-btn">Exportar Indicadores</button>
+                <button type="button" class="btn-secondary" id="export-ledger-btn">Exportar Conta-Corrente</button>
+            </div>
+            <div class="text-xs text-gray-500 mt-3">
+                Ações auditadas: +doentes ${stats.addedPatients} · edições ${stats.editedPatients} · novas prescrições ${stats.newPrescriptions}
+            </div>
         `;
     }
     editSolution(solutionName = null) {
