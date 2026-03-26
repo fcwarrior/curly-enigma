@@ -12,6 +12,10 @@ body {
     min-height: 100vh;
 }
 
+.app-shell {
+    background: #eef2f7;
+}
+
 .container {
     max-width: 1280px; /* Increased max-width slightly */
     margin-left: auto;
@@ -20,16 +24,17 @@ body {
     padding-right: 1rem;
 }
 
-header {
+.app-sidebar {
     width: 260px;
     min-height: 100vh;
     overflow-y: auto;
     flex: 0 0 260px;
     position: sticky;
     top: 0;
+    background: linear-gradient(180deg, #0f2a4d 0%, #173861 65%, #1f4f86 100%);
 }
 
-header .container {
+.app-sidebar .container {
     max-width: none;
     width: 100%;
     height: 100%;
@@ -37,18 +42,61 @@ header .container {
     flex-direction: column;
 }
 
-header nav {
+.app-sidebar nav {
     display: flex;
     flex-direction: column;
     align-items: stretch !important;
     margin-top: 1rem;
 }
 
-main {
+.app-main-content {
     flex: 1;
     margin-left: 0;
     max-width: none !important;
     width: calc(100vw - 260px);
+}
+
+.app-page-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+    margin-bottom: 1.25rem;
+    padding: 1rem 1.25rem;
+    background: #ffffff;
+    border: 1px solid #d9e2ef;
+    border-radius: 0.85rem;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05);
+}
+
+.app-page-title {
+    margin: 0;
+    font-size: 1.5rem;
+    line-height: 1.25;
+    font-weight: 700;
+    color: #10233d;
+}
+
+.app-page-subtitle {
+    margin: 0;
+    font-size: 0.82rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #4c6484;
+    font-weight: 600;
+}
+
+.app-page-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.78rem;
+    font-weight: 600;
+    padding: 0.45rem 0.8rem;
+    border-radius: 999px;
+    background: #e8f1ff;
+    color: #1e3a8a;
+    border: 1px solid #c4d7fb;
 }
 
 .calc-layout {
@@ -79,29 +127,30 @@ main {
 
 /* --- Navigation --- */
 .nav-btn {
-    /* Base styles defined by Tailwind in HTML: px-3 py-2 rounded-lg transition-colors duration-200 ease-in-out cursor-pointer */
-    /* Hover styles defined by Tailwind: hover:bg-blue-700 hover:text-white */
-    display: inline-flex; /* Ensure alignment with icons */
+    display: inline-flex;
     align-items: center;
     text-decoration: none;
-    color: #e5e7eb; /* gray-200 - Initial color for nav buttons */
-    padding: 0.5rem 0.75rem; /* py-2 px-3 */
-    border-radius: 0.5rem; /* rounded-lg */
+    padding: 0.5rem 0.75rem;
+    border-radius: 0.5rem;
     transition: color 0.2s ease-in-out, background-color 0.2s ease-in-out;
     cursor: pointer;
 }
-.nav-btn:hover {
+
+.app-sidebar .nav-btn {
+    color: #e5e7eb; /* gray-200 - Initial color for nav buttons */
+}
+.app-sidebar .nav-btn:hover {
      background-color: #2563eb; /* blue-600 or similar for hover */
      color: white; /* Ensure text is white on hover background */
 }
-.nav-btn:disabled {
+.app-sidebar .nav-btn:disabled {
     opacity: 0.5;
     cursor: not-allowed;
 }
 /* Active state defined directly in style block in HTML for dynamic class addition */
 /* .nav-btn.active is handled in the <style> tag in index.html */
 
-.nav-btn i { /* Icon margin */
+.app-sidebar .nav-btn i { /* Icon margin */
     margin-right: 0.35rem; /* Slightly smaller margin */
 }
 /* Hide admin buttons by default - JS will remove 'hidden' based on permissions */
@@ -112,20 +161,21 @@ main {
 /* --- Sections --- */
 .section {
     background-color: #ffffff;
-    border-radius: 0.5rem; /* rounded-lg */
-    box-shadow: 0 1px 3px 0 rgba(0,0,0,0.1), 0 1px 2px 0 rgba(0,0,0,0.06); /* shadow-md */
+    border-radius: 0.9rem;
+    border: 1px solid #dbe3ef;
+    box-shadow: 0 2px 8px rgba(15, 23, 42, 0.06);
     padding: 1.5rem; /* p-6 */
-    margin-bottom: 2rem; /* mb-8 */
+    margin-bottom: 1.25rem;
 }
 .section h2, .section h3 {
-    color: #374151; /* gray-700 */
-    margin-bottom: 1.5rem; /* mb-6 */
+    color: #203755;
+    margin-bottom: 1.1rem;
     display: flex; /* Align icons with headings */
     align-items: center;
 }
 .section h2 i, .section h3 i {
     margin-right: 0.5rem; /* mr-2 */
-    color: #4b5563; /* gray-600 - Icon color matches heading or slightly lighter */
+    color: #35557e;
 }
 
 /* --- Forms --- */
@@ -585,14 +635,22 @@ body.modal-open {
     body {
         display: block;
     }
-    header {
-        position: static;
-        width: 100%;
-        height: auto;
-        min-height: auto;
+    .app-sidebar {
+        position: fixed;
+        inset: 0 auto 0 0;
+        z-index: 60;
+        width: min(320px, 86vw);
+        height: 100vh;
+        min-height: 100vh;
         flex: none;
+        transform: translateX(-110%);
+        transition: transform 0.25s ease;
+        box-shadow: 6px 0 24px rgba(2, 6, 23, 0.28);
     }
-    main {
+    body.sidebar-open .app-sidebar {
+        transform: translateX(0);
+    }
+    .app-main-content {
         margin-left: 0;
         max-width: 100% !important;
         width: 100%;
@@ -600,13 +658,21 @@ body.modal-open {
     .calc-layout {
         grid-template-columns: 1fr;
     }
-    header .container {
+    .app-sidebar .container {
         /* Allow stacking via flex-wrap in HTML */
     }
-    header nav {
+    .app-sidebar nav {
         width: 100%;
         justify-content: center; /* Center nav items */
         margin-top: 1rem; /* Add space if stacked */
+    }
+    .app-page-header {
+        padding: 0.85rem 1rem;
+        flex-direction: column;
+        align-items: flex-start;
+    }
+    .app-page-title {
+        font-size: 1.2rem;
     }
     .section {
         padding: 1rem; /* p-4 */

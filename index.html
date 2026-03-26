@@ -41,9 +41,9 @@
     </style>
 </head>
 
-<body class="bg-gray-100">
-    <!-- Header section -->
-    <header class="bg-blue-800 text-white py-4 shadow-lg sticky top-0 z-40">
+<body class="bg-gray-100 app-shell">
+    <!-- Sidebar -->
+    <header class="bg-blue-800 text-white py-4 shadow-lg sticky top-0 z-40 app-sidebar">
         <div class="container mx-auto px-4 max-w-5xl">
             <div class="flex flex-wrap items-center justify-between gap-4">
                 <!-- Logo and Application Title -->
@@ -57,6 +57,9 @@
                         <input type="text" id="user-name" placeholder="Nome do Utilizador" title="Insira o seu nome (será guardado)" class="mt-2 input-field text-black !text-black bg-white rounded px-2 py-1 text-sm" style="max-width: 200px;">
                     </div>
                 </div>
+                <button id="sidebar-toggle-btn" type="button" class="btn-secondary lg:hidden self-start" title="Mostrar/Ocultar navegação">
+                    <i class="fas fa-bars mr-2"></i> Menu
+                </button>
                 <!-- Navigation Menu -->
                 <nav class="flex flex-wrap items-center gap-2">
                     <button id="prescription-nav-btn" class="nav-btn" title="Calculadora NP"> <i class="fas fa-calculator mr-1"></i>Calculadora NP </button>
@@ -100,7 +103,17 @@
     </header>
 
     <!-- Main content container -->
-    <main class="container mx-auto px-4 py-8 max-w-5xl">
+    <main class="container mx-auto px-4 py-8 max-w-5xl app-main-content">
+        <div class="app-page-header">
+            <div>
+                <p id="app-page-subtitle" class="app-page-subtitle">Módulo ativo: Doentes</p>
+                <h1 id="app-page-title" class="app-page-title">Gestão de Doentes</h1>
+            </div>
+            <div class="app-page-chip">
+                <i class="fas fa-shield-alt"></i>
+                <span>Fluxo Clínico Seguro</span>
+            </div>
+        </div>
 
         <!-- Patients Section -->
         <section id="patients-section" class="section bg-white rounded-lg shadow-md p-6 mb-8">

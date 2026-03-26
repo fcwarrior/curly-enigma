@@ -767,7 +767,7 @@ class NutriSoft {
     }
     updateNavButtons(sectionId) { 
         // console.log(`NutriSoft.updateNavButtons: Updating for section '${sectionId}'`);
-        document.querySelectorAll('.nav-btn').forEach(btn => {
+        document.querySelectorAll('.nav-btn[id$="-nav-btn"]').forEach(btn => {
             btn.classList.remove('active', 'bg-blue-700', 'text-white'); 
         });
         const activeBtn = document.getElementById(`${sectionId}-nav-btn`);
@@ -777,6 +777,25 @@ class NutriSoft {
         } else {
             console.warn(`NutriSoft.updateNavButtons: Active button for section '${sectionId}' (ID: ${sectionId}-nav-btn) not found.`);
         }
+    }
+    updatePageContext(sectionId) {
+        const titleEl = document.getElementById('app-page-title');
+        const subtitleEl = document.getElementById('app-page-subtitle');
+        if (!titleEl || !subtitleEl) return;
+
+        const section = document.getElementById(`${sectionId}-section`);
+        const heading = section?.querySelector('h2');
+        const fallbackTitles = {
+            prescription: 'Calculadora NP',
+            reports: 'Produção',
+            patients: 'Doentes',
+            solutions: 'Soluções',
+            settings: 'Configurações',
+            evolution: 'Evolução',
+            performance: 'Indicadores'
+        };
+        titleEl.textContent = heading?.textContent?.trim() || fallbackTitles[sectionId] || 'NutriSoft';
+        subtitleEl.textContent = `Módulo ativo: ${titleEl.textContent}`;
     }
     showSection(sectionId) { 
         console.log(`NutriSoft.showSection: Attempting to show section: '${sectionId}'`);
@@ -793,6 +812,8 @@ class NutriSoft {
 
         if (sectionShown) {
             this.updateNavButtons(sectionId);
+            this.updatePageContext(sectionId);
+            document.body.classList.remove('sidebar-open');
             switch (sectionId) {
                 case 'reports': this.renderReports(); break;
                 case 'prescription':
@@ -935,6 +956,9 @@ class NutriSoft {
     }
     initEventListeners() { 
         console.log("NutriSoft.initEventListeners: Setting up event listeners...");
+        document.getElementById('sidebar-toggle-btn')?.addEventListener('click', () => {
+            document.body.classList.toggle('sidebar-open');
+        });
 
         const userNameInput = document.getElementById('user-name');
         userNameInput?.addEventListener('change', (event) => {
